@@ -339,12 +339,15 @@ function computeLayout(activities, W, H) {
         : 'lr';
 
       const singleColW = W - Math.round(W * 0.05) * 2;
+      // 根据活动数量动态缩放字号：活动越少字号越大
+      // 以6个活动为基准(84px)，2个活动约168px，反比关系
+      const fontScale = Math.min(1.45, Math.max(1.0, 4.5 / Math.max(1, rows)));
       const fontSizeText = hasImg
-        ? Math.max(44, Math.round(singleColW * 0.06))
-        : Math.max(52, Math.round(mw * 0.065));
+        ? Math.max(38, Math.round(singleColW * 0.045 * fontScale))
+        : Math.max(44, Math.round(mw * 0.044 * fontScale));
       const fontSizePrice = hasImg
-        ? Math.max(56, Math.round(singleColW * 0.075))
-        : Math.max(66, Math.round(mw * 0.08));
+        ? Math.max(48, Math.round(singleColW * 0.058 * fontScale))
+        : Math.max(56, Math.round(mw * 0.057 * fontScale));
       const lineH = Math.round(fontSizeText * 1.6);
 
       let imgCardSize = 0, imgAreaTotalW = 0;
@@ -358,7 +361,9 @@ function computeLayout(activities, W, H) {
         imgCardSize = Math.round(mw * imgRatio * 0.9 * 0.75);
         imgAreaTotalW = imgCardSize;
         const textAreaW = Math.round(mw * 0.9);
-        maxChars = Math.max(3, Math.floor(textAreaW / fontSizeText));
+        // 有高亮时关键词用更大字号+间距，需给额外余量
+        const hlOverhead = act.highlight ? 0.65 : 0.85;
+        maxChars = Math.max(3, Math.floor(textAreaW / fontSizeText * hlOverhead));
         const text = act.discountDetail || act.content || '';
         wrapped = wrapLines(text, maxChars);
         console.log(`[TB] text="${text}", maxChars=${maxChars}, wrapped=${JSON.stringify(wrapped)}, cols=${cols}`);
@@ -381,8 +386,10 @@ function computeLayout(activities, W, H) {
         const padRight = padLeft;
         const imgPad   = Math.round(W * 0.05);
         const textAreaW = cardW - padLeft - padRight - (hasImg ? imgAreaTotalW + imgPad : 0);
-        maxChars = Math.max(3, Math.floor(textAreaW / fontSizeText * 0.85));
-        if (hasImg && isSingleImg) maxChars = Math.min(maxChars, 6);
+        // 有高亮时关键词用更大字号(fontSizePrice)，需用更大字号计算maxChars
+        const effectiveFontSize = act.highlight ? Math.max(fontSizeText, fontSizePrice) : fontSizeText;
+        maxChars = Math.max(3, Math.floor(textAreaW / effectiveFontSize * 0.78));
+        if (hasImg && isSingleImg) maxChars = Math.min(maxChars, act.highlight ? 7 : 6);
         const text = act.discountDetail || act.content || '';
         wrapped = wrapLines(text, maxChars);
         console.log(`[LR] text="${text}", maxChars=${maxChars}, wrapped=${JSON.stringify(wrapped)}, hasImg=${hasImg}, isSingleImg=${isSingleImg}, cols=${cols}, layout=${layout}`);
@@ -479,7 +486,10 @@ function computeLayout(activities, W, H) {
         // 上下布局：图片顶部居中，文字在剩余空间水平+垂直居中
         md.imgX = md.cardX + Math.floor((md.cardW - md.imgCardSize) / 2);
         md.imgY = y + Math.round(md.rowH * 0.05);
-        md.textCenterX = md.cardX + Math.floor(md.cardW / 2);
+        // 用与换行计算一致的 textAreaW 来居中文字，避免溢出
+        const tbPad = Math.round(md.cardW * 0.05);
+        const tbTextW = md.cardW - tbPad * 2;
+        md.textCenterX = md.cardX + tbPad + Math.floor(tbTextW / 2);
         const ascent = Math.round(md.fontSizeText * 0.7);
         const frameBw = Math.max(3, Math.round(md.imgCardSize * 0.012));
         const imgBottom = md.imgY + md.imgCardSize + frameBw;
@@ -526,6 +536,19 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
   const parts = [];
   parts.push(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
 
+  // 为每个模块定义裁剪区域
+  const defs = ['<defs>'];
+  M.forEach((md, i) => {
+    const bottomLimit = Math.round(H * 0.97);
+    const clipH = Math.min(md.rowH, bottomLimit - md.y);
+    const radius = Math.round(W * 0.01);
+    if (clipH > 0) {
+      defs.push(`<clipPath id="mclip${i}"><rect x="${md.cardX}" y="${md.y}" width="${md.cardW}" height="${clipH}" rx="${radius}"/></clipPath>`);
+    }
+  });
+  defs.push('</defs>');
+  parts.push(defs.join('\n'));
+
   // 计算所有活动模块的整体包围盒
   const padExtra = Math.round(W * 0.01125);
   const outerRadius = Math.round(W * 0.01125);
@@ -551,7 +574,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
   }
 
   // 活动模块
-  M.forEach((md) => {
+  M.forEach((md, mi) => {
     const { y: my, rowH: mh } = md;
     const bottomLimit = Math.round(H * 0.97);
     if (my >= bottomLimit) return;
@@ -565,6 +588,9 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
     const moduleBg = lightenColor(rawBg, 0.08);
 
     parts.push(`<rect x="${md.cardX}" y="${my}" width="${md.cardW}" height="${clipH}" rx="${radius}" fill="${moduleBg}" stroke="${accentColor}" stroke-opacity="0.50" stroke-width="${strokeW}"/>`);
+
+    // 裁剪组：防止文字溢出模块边界
+    parts.push(`<g clip-path="url(#mclip${mi})">`);
 
     // 文字定位
     let ty;
@@ -625,10 +651,11 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
       }
       ty += md.lineH;
     });
+    parts.push('</g>');
   });
 
   // ===== 底部商家信息（一行排列，节日色，渐变背景） =====
-  if (merchantInfo && (merchantInfo.name || merchantInfo.address || merchantInfo.phone || merchantInfo.wechat)) {
+  if (merchantInfo && (merchantInfo.name || merchantInfo.address || merchantInfo.phone)) {
     const bottomY = Math.round(H * 0.955);
     const fontS = Math.round(H * 0.021);
 
@@ -637,7 +664,6 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
     if (merchantInfo.name) parts_list.push(merchantInfo.name);
     if (merchantInfo.address) parts_list.push(merchantInfo.address);
     if (merchantInfo.phone) parts_list.push('电话：' + merchantInfo.phone);
-    if (merchantInfo.wechat) parts_list.push('微信：' + merchantInfo.wechat);
     const line = parts_list.join('  |  ');
 
     const textY = bottomY + Math.round(fontS * 0.75);
@@ -714,6 +740,20 @@ async function createFramedImage(imagePath, cardSize) {
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+// ===== 从URL或dataURL获取图片Buffer =====
+async function resolveImageBuffer(url) {
+  if (!url) return null;
+  // base64 data URL
+  if (url.startsWith('data:')) {
+    const base64 = url.split(',')[1];
+    return base64 ? Buffer.from(base64, 'base64') : null;
+  }
+  // 磁盘文件
+  const localPath = path.join(UPLOAD_DIR, path.basename(url));
+  if (fs.existsSync(localPath)) return fs.readFileSync(localPath);
+  return null;
+}
+
 // ===== 合成商品图 =====
 async function composeProductImages(imageBuffer, layout) {
   if (!layout || !layout.M.some(m => m.hasImg)) return imageBuffer;
@@ -723,14 +763,14 @@ async function composeProductImages(imageBuffer, layout) {
     for (let j = 0; j < md.imgCount; j++) {
       const url = md.act.imageUrls[j];
       if (!url) continue;
-      const localPath = path.join(UPLOAD_DIR, path.basename(url));
-      if (!fs.existsSync(localPath)) continue;
       try {
+        const imgBuf = await resolveImageBuffer(url);
+        if (!imgBuf) continue;
         const offsetX = j * (md.imgCardSize + Math.round(layout.W * 0.01));
         const bw = Math.max(3, Math.round(md.imgCardSize * 0.012));
-        const framed = await createFramedImage(localPath, md.imgCardSize);
+        const framed = await createFramedImage(imgBuf, md.imgCardSize);
         overlays.push({ input: framed, top: md.imgY - bw, left: md.imgX + offsetX - bw });
-      } catch (e) { console.error(`[合成图片失败] ${localPath}:`, e.message); }
+      } catch (e) { console.error(`[合成图片失败] ${url.substring(0, 60)}:`, e.message); }
     }
   }
   if (!overlays.length) return imageBuffer;
@@ -790,4 +830,543 @@ async function renderCarSticker(backgroundBuffer, data, options = {}) {
   return await sharp(backgroundBuffer).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
 }
 
-module.exports = { renderBackPoster, renderCarSticker, computeLayout };
+// ===== Leafer UI JSON 构建器 =====
+
+/**
+ * 将 computeLayout() 输出转为 Leafer UI JSON 节点树
+ * 用于在 gzm-design 画布中生成可编辑元素
+ */
+function buildLeaferJson(layout, brand, merchantInfo, bgImageUrl, options = {}) {
+  if (!layout) return null;
+  const { W, H, M, sidePad, rowGap, rowHs, rowPattern } = layout;
+  const { primaryColor, secondaryColor, bgColor } = options;
+  const accentColor = primaryColor || '#FFD700';
+  const fontFamily = 'Noto Serif SC';
+  const defaultBg = bgColor || '#1a1a3a';
+  // 宽度缓冲系数：estimateWidth 是按 SVG 估算的，编辑器字体渲染可能更宽
+  const WIDTH_BUFFER = 1.15;
+
+  let zIndex = 1;
+  const children = [];
+
+  // 背景图
+  children.push({
+    tag: 'Image2',
+    name: 'AI背景',
+    x: 0, y: 0, width: W, height: H,
+    zIndex: zIndex++,
+    draggable: true, editable: true,
+    fill: [{ type: 'image', url: bgImageUrl }],
+  });
+
+  // 白色半透明大容器
+  if (M.length > 0) {
+    let minX = Infinity, maxX = 0, minY = Infinity, maxY = 0;
+    M.forEach(md => {
+      minX = Math.min(minX, md.cardX);
+      maxX = Math.max(maxX, md.cardX + md.cardW);
+      minY = Math.min(minY, md.y);
+      maxY = Math.max(maxY, md.y + md.rowH);
+    });
+    const padExtra = Math.round(W * 0.01125);
+    const outerRadius = Math.round(W * 0.01125);
+    const maxAllowedY = Math.round(H * 0.97);
+    const outerX = minX - padExtra;
+    const outerY = minY - padExtra;
+    const outerW = (maxX - minX) + padExtra * 2;
+    const outerH = Math.min((maxY - minY) + padExtra * 2, maxAllowedY - outerY);
+    if (outerH > 0) {
+      children.push({
+        tag: 'Rect',
+        name: '内容容器',
+        x: outerX, y: outerY, width: outerW, height: outerH,
+        cornerRadius: outerRadius,
+        zIndex: zIndex++,
+        draggable: true, editable: true,
+        fill: [{ type: 'solid', color: 'rgba(255,255,255,0.75)' }],
+      });
+    }
+  }
+
+  // 每个活动模块
+  M.forEach((md, idx) => {
+    const bottomLimit = Math.round(H * 0.97);
+    if (md.y >= bottomLimit) return;
+    const clipH = Math.min(md.rowH, bottomLimit - md.y);
+    if (clipH <= 0) return;
+
+    const radius = Math.round(W * 0.01);
+    const strokeW = Math.round(W * 0.0015);
+    const rawBg = bgColor || md.act.bgColor || '#2a2a5a';
+    const moduleBg = lightenColor(rawBg, 0.08);
+    const priceColor = lightenColor(accentColor, 0.3);
+
+    const groupChildren = [];
+    let gZ = 1;
+
+    // 模块背景卡片
+    groupChildren.push({
+      tag: 'Rect',
+      name: `活动${idx + 1}背景`,
+      x: 0, y: 0, width: md.cardW, height: clipH,
+      cornerRadius: radius,
+      zIndex: gZ++,
+      draggable: true, editable: true,
+      fill: [{ type: 'solid', color: moduleBg }],
+      stroke: [{ type: 'solid', color: accentColor }],
+      strokeWidth: strokeW,
+      strokeOpacity: 0.5,
+    });
+
+    // 文字行
+    let ty;
+    if (md.layout === 'tb') {
+      ty = md.textY - md.y;
+    } else {
+      const visualHeight = (md.wrapped.length - 1) * md.lineH + md.fontSizeText;
+      const visualTop = Math.floor(Math.max(0, clipH - visualHeight) / 2);
+      ty = visualTop + Math.round(md.fontSizeText * 0.85);
+    }
+
+    md.wrapped.forEach((wl, lineIdx) => {
+      if (ty + Math.round(md.fontSizeText * 0.3) > clipH - Math.round(H * 0.01)) return;
+
+      const textX = md.textCenterX - md.cardX;
+      const hasHighlight = md.act.highlight && wl.includes(md.act.highlight);
+
+      if (hasHighlight) {
+        // 高亮行：拆分为前段 + 关键词 + 后段
+        const hlKeyword = md.act.highlight;
+        const hlFontSize = md.fontSizePrice;
+        const hlColor = bgColor || '#1a1a3a';
+        const idx_hl = wl.indexOf(hlKeyword);
+        const beforeText = wl.slice(0, idx_hl);
+        const afterText = wl.slice(idx_hl + hlKeyword.length);
+        const beforeW = estimateWidth(beforeText, md.fontSizeText);
+        const hlW = estimateWidth(hlKeyword, hlFontSize);
+        const afterW = estimateWidth(afterText, md.fontSizeText);
+        const padX = Math.round(hlFontSize * 0.3);
+        const gap = padX * 3;
+        const totalW = beforeW + (beforeText ? gap : 0) + hlW + (afterText ? gap : 0) + afterW;
+        const normalVisualCenter = ty - md.fontSizeText * 0.45;
+        const hlCenterX = textX - Math.round(totalW / 2) + (beforeText ? beforeW + gap : 0) + Math.round(hlW / 2);
+        const hlBgX = hlCenterX - Math.round(hlW / 2) - padX - md.cardX + md.cardX;
+        const hlBgY = Math.round(normalVisualCenter - hlFontSize * 0.55);
+        const hlBgW = hlW + padX * 2;
+        const hlBgH = Math.round(hlFontSize * 1.1);
+        const hlR = Math.round(hlFontSize * 0.15);
+
+        // 前段文字
+        if (beforeText) {
+          const beforeX = textX - Math.round(totalW / 2) + Math.round(beforeW / 2);
+          groupChildren.push({
+            tag: 'Text', name: `活动${idx + 1}-前段${lineIdx}`,
+            x: beforeX - Math.round(beforeW / 2), y: ty - Math.round(md.fontSizeText * 0.75),
+            width: Math.round(beforeW * WIDTH_BUFFER), height: md.fontSizeText * 1.5,
+            text: beforeText, fontFamily, fontSize: md.fontSizeText,
+            textAlign: 'center',
+            zIndex: gZ++, draggable: true, editable: true,
+            fill: [{ type: 'solid', color: '#FFFFFF' }],
+          });
+        }
+        // 高亮背景
+        groupChildren.push({
+          tag: 'Rect', name: `活动${idx + 1}-高亮${lineIdx}`,
+          x: hlBgX, y: hlBgY, width: hlBgW, height: hlBgH,
+          cornerRadius: hlR,
+          zIndex: gZ++, draggable: true, editable: true,
+          fill: [{ type: 'solid', color: '#FFFFFF' }],
+        });
+        // 高亮关键词
+        groupChildren.push({
+          tag: 'Text', name: `活动${idx + 1}-关键词${lineIdx}`,
+          x: hlCenterX - Math.round(hlW / 2), y: Math.round(normalVisualCenter - hlFontSize * 0.55),
+          width: Math.round(hlW * WIDTH_BUFFER), height: hlFontSize * 1.1,
+          text: hlKeyword, fontFamily, fontSize: hlFontSize, fontWeight: 'bold',
+          textAlign: 'center',
+          zIndex: gZ++, draggable: true, editable: true,
+          fill: [{ type: 'solid', color: hlColor }],
+        });
+        // 后段文字
+        if (afterText) {
+          const afterX = hlCenterX + Math.round(hlW / 2) + gap + Math.round(afterW / 2);
+          groupChildren.push({
+            tag: 'Text', name: `活动${idx + 1}-后段${lineIdx}`,
+            x: afterX - Math.round(afterW / 2), y: ty - Math.round(md.fontSizeText * 0.75),
+            width: Math.round(afterW * WIDTH_BUFFER), height: md.fontSizeText * 1.5,
+            text: afterText, fontFamily, fontSize: md.fontSizeText,
+            textAlign: 'center',
+            zIndex: gZ++, draggable: true, editable: true,
+            fill: [{ type: 'solid', color: '#FFFFFF' }],
+          });
+        }
+      } else {
+        // 普通行：检查是否含价格数字
+        const tokens = tokenize(wl);
+        const hasPrice = tokens.some(t => t.isPrice);
+
+        if (hasPrice) {
+          // 含价格 → 拆成多个文字节点
+          let curX = textX - Math.round(estimateWidth(wl, md.fontSizeText) / 2);
+          tokens.forEach((tok, ti) => {
+            const fs = tok.isPrice ? md.fontSizePrice : md.fontSizeText;
+            const tw = estimateWidth(tok.text, fs);
+            const color = tok.isPrice ? priceColor : '#FFFFFF';
+            groupChildren.push({
+              tag: 'Text', name: `活动${idx + 1}-L${lineIdx}T${ti}`,
+              x: curX, y: ty - Math.round(md.fontSizeText * 0.75),
+              width: Math.round(tw * WIDTH_BUFFER), height: fs * 1.5,
+              text: tok.text, fontFamily, fontSize: fs,
+              fontWeight: tok.isPrice ? 'bold' : 'normal',
+              textAlign: 'center',
+              zIndex: gZ++, draggable: true, editable: true,
+              fill: [{ type: 'solid', color }],
+            });
+            curX += tw;
+          });
+        } else {
+          // 纯文字行 → 单个文字节点，居中
+          const textW = estimateWidth(wl, md.fontSizeText);
+          groupChildren.push({
+            tag: 'Text', name: `活动${idx + 1}-文字${lineIdx}`,
+            x: textX - Math.round(textW / 2), y: ty - Math.round(md.fontSizeText * 0.75),
+            width: Math.round(textW * WIDTH_BUFFER), height: md.fontSizeText * 1.5,
+            text: wl, fontFamily, fontSize: md.fontSizeText,
+            textAlign: 'center',
+            zIndex: gZ++, draggable: true, editable: true,
+            fill: [{ type: 'solid', color: '#FFFFFF' }],
+          });
+        }
+      }
+      ty += md.lineH;
+    });
+
+    // 商品图
+    if (md.hasImg && md.imgCount > 0) {
+      for (let j = 0; j < md.imgCount; j++) {
+        const url = md.act.imageUrls[j];
+        if (!url) continue;
+        const offsetX = j * (md.imgCardSize + Math.round(layout.W * 0.01));
+        const localPath = path.join(UPLOAD_DIR, path.basename(url));
+        const imgUrl = fs.existsSync(localPath) ? `/uploads/${path.basename(url)}` : url;
+        groupChildren.push({
+          tag: 'Image2', name: `活动${idx + 1}-商品图${j + 1}`,
+          x: md.imgX - md.cardX + offsetX, y: md.imgY - md.y,
+          width: md.imgCardSize, height: md.imgCardSize,
+          zIndex: gZ++, draggable: true, editable: true,
+          cornerRadius: Math.round(md.imgCardSize * 0.04),
+          fill: [{ type: 'image', url: imgUrl }],
+        });
+      }
+    }
+
+    children.push({
+      tag: 'Group',
+      name: `活动${idx + 1}`,
+      x: md.cardX, y: md.y, width: md.cardW, height: clipH,
+      zIndex: zIndex++,
+      draggable: true, editable: true,
+      children: groupChildren,
+    });
+  });
+
+  // 底部商家信息
+  if (merchantInfo && (merchantInfo.name || merchantInfo.address || merchantInfo.phone)) {
+    const bottomY = Math.round(H * 0.955);
+    const fontS = Math.round(H * 0.021);
+    const parts_list = [];
+    if (merchantInfo.name) parts_list.push(merchantInfo.name);
+    if (merchantInfo.address) parts_list.push(merchantInfo.address);
+    if (merchantInfo.phone) parts_list.push('电话：' + merchantInfo.phone);
+    const line = parts_list.join('  |  ');
+    const textColor = darkenColor(accentColor || '#FFD700', 0.25);
+    const textW = estimateWidth(line, fontS);
+
+    // 渐变背景
+    const boxPadX = Math.round(W * 0.04);
+    const boxPadY = Math.round(fontS * 0.4);
+    const boxW = textW + boxPadX * 2;
+    const boxH = fontS + boxPadY * 2;
+    const boxX = Math.round(W / 2 - boxW / 2);
+    const boxY = bottomY - fontS - boxPadY + Math.round(fontS * 0.1);
+    const boxR = Math.round(W * 0.012);
+
+    children.push({
+      tag: 'Rect', name: '商家信息背景',
+      x: boxX, y: boxY, width: boxW, height: boxH,
+      cornerRadius: boxR,
+      zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: 'rgba(255,255,255,0.8)' }],
+    });
+
+    children.push({
+      tag: 'Text', name: '商家信息',
+      x: Math.round(W / 2 - textW / 2), y: bottomY - Math.round(fontS * 0.3),
+      width: Math.round(textW * WIDTH_BUFFER), height: fontS * 1.5,
+      text: line, fontFamily, fontSize: fontS, fontWeight: 'bold',
+      textAlign: 'center',
+      zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: textColor }],
+    });
+  }
+
+  return {
+    tag: 'Frame',
+    name: '反面海报',
+    width: W, height: H,
+    fill: [{ type: 'solid', color: defaultBg }],
+    children,
+  };
+}
+
+/**
+ * 正面海报 JSON 构建器
+ * data: { brand, theme, subtitle, startDate, endDate, mainTitle, subTitle, secMainTitle, secSubTitle }
+ */
+function buildFrontLeaferJson(data, bgImageUrl, options = {}) {
+  const W = options.width || 2100;
+  const H = options.height || 2970;
+  const { brand, theme, subtitle, startDate, endDate, mainTitle, subTitle, secMainTitle, secSubTitle } = data;
+  const primaryColor = options.primaryColor || '#FFD700';
+  const secondaryColor = options.secondaryColor || '#FF6B35';
+  const bgColor = options.bgColor || '#1a1a3a';
+  const fontFamily = 'Noto Serif SC';
+  const centerX = Math.round(W / 2);
+
+  let zIndex = 1;
+  const children = [];
+
+  // 背景图
+  children.push({
+    tag: 'Image2', name: 'AI背景',
+    x: 0, y: 0, width: W, height: H,
+    zIndex: zIndex++, draggable: true, editable: true,
+    fill: [{ type: 'image', url: bgImageUrl }],
+  });
+
+  // 品牌名 - 顶部居中
+  if (brand) {
+    const brandSize = Math.round(W * 0.048);
+    children.push({
+      tag: 'Text', name: '品牌名',
+      x: 0, y: Math.round(H * 0.03), width: W, height: brandSize * 1.4,
+      text: brand, fontFamily, fontSize: brandSize, fontWeight: 'normal',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFFFFF' }],
+    });
+  }
+
+  // 活动主题 - 中央偏上
+  if (theme) {
+    const themeSize = Math.round(W * 0.076);
+    const themeY = Math.round(H * 0.12);
+    children.push({
+      tag: 'Text', name: '活动主题',
+      x: 0, y: themeY, width: W, height: themeSize * 1.4,
+      text: theme, fontFamily, fontSize: themeSize, fontWeight: 'bold',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: primaryColor }],
+    });
+  }
+
+  // 副标题
+  if (subtitle) {
+    const subSize = Math.round(W * 0.033);
+    const subY = Math.round(H * 0.2);
+    children.push({
+      tag: 'Text', name: '副标题',
+      x: 0, y: subY, width: W, height: subSize * 1.4,
+      text: subtitle, fontFamily, fontSize: subSize, fontWeight: 'normal',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFFFFF' }],
+    });
+  }
+
+  // 活动时间
+  let dateText = '';
+  if (startDate && endDate) dateText = `${startDate} 至 ${endDate}`;
+  else if (startDate) dateText = `${startDate}起`;
+  if (dateText) {
+    const dateSize = Math.round(W * 0.026);
+    const dateY = Math.round(H * 0.25);
+    children.push({
+      tag: 'Text', name: '活动时间',
+      x: 0, y: dateY, width: W, height: dateSize * 1.4,
+      text: dateText, fontFamily, fontSize: dateSize, fontWeight: 'normal',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: 'rgba(255,255,255,0.8)' }],
+    });
+  }
+
+  // 下半部分色块
+  const blockY = Math.round(H * 0.32);
+  const blockH = Math.round(H * 0.62);
+  const blockRadius = Math.round(W * 0.02);
+  const blockStrokeW = Math.round(W * 0.002);
+  children.push({
+    tag: 'Rect', name: '促销色块',
+    x: Math.round(W * 0.04), y: blockY, width: Math.round(W * 0.92), height: blockH,
+    cornerRadius: blockRadius,
+    zIndex: zIndex++, draggable: true, editable: true,
+    fill: [{ type: 'solid', color: bgColor }],
+    stroke: [{ type: 'solid', color: secondaryColor }],
+    strokeWidth: blockStrokeW, strokeOpacity: 0.6,
+  });
+
+  // 主标题 - 色块内居中
+  if (mainTitle) {
+    const mainSize = Math.round(W * 0.076);
+    const mainY = blockY + Math.round(blockH * 0.15);
+    children.push({
+      tag: 'Text', name: '主标题',
+      x: 0, y: mainY, width: W, height: mainSize * 1.5,
+      text: mainTitle, fontFamily, fontSize: mainSize, fontWeight: 'bold',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFFFFF' }],
+    });
+  }
+
+  // 主副标题
+  if (subTitle) {
+    const subSize = Math.round(W * 0.038);
+    const subY = blockY + Math.round(blockH * 0.38);
+    children.push({
+      tag: 'Text', name: '主副标题',
+      x: 0, y: subY, width: W, height: subSize * 1.4,
+      text: subTitle, fontFamily, fontSize: subSize, fontWeight: 'normal',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: 'rgba(255,255,255,0.9)' }],
+    });
+  }
+
+  // 分割线
+  if (mainTitle && secMainTitle) {
+    const lineY = blockY + Math.round(blockH * 0.52);
+    const lineW = Math.round(W * 0.3);
+    children.push({
+      tag: 'Line', name: '分割线',
+      x: centerX - Math.round(lineW / 2), y: lineY, width: lineW, height: 0,
+      zIndex: zIndex++, draggable: true, editable: true,
+      stroke: [{ type: 'solid', color: primaryColor }],
+      strokeWidth: Math.round(W * 0.002),
+    });
+  }
+
+  // 次爆点主标题
+  if (secMainTitle) {
+    const secSize = Math.round(W * 0.06);
+    const secY = blockY + Math.round(blockH * 0.58);
+    children.push({
+      tag: 'Text', name: '次爆点主标题',
+      x: 0, y: secY, width: W, height: secSize * 1.5,
+      text: secMainTitle, fontFamily, fontSize: secSize, fontWeight: 'bold',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFFFFF' }],
+    });
+  }
+
+  // 次爆点副标题
+  if (secSubTitle) {
+    const secSubSize = Math.round(W * 0.033);
+    const secSubY = blockY + Math.round(blockH * 0.78);
+    children.push({
+      tag: 'Text', name: '次爆点副标题',
+      x: 0, y: secSubY, width: W, height: secSubSize * 1.4,
+      text: secSubTitle, fontFamily, fontSize: secSubSize, fontWeight: 'normal',
+      textAlign: 'center', zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: 'rgba(255,255,255,0.85)' }],
+    });
+  }
+
+  return {
+    tag: 'Frame', name: '正面海报',
+    width: W, height: H,
+    fill: [{ type: 'solid', color: bgColor }],
+    children,
+  };
+}
+
+/**
+ * 车贴 JSON 构建器
+ */
+function buildCarStickerJson(data, bgImageUrl, options = {}) {
+  const W = options.width || 2000;
+  const H = options.height || 800;
+  const { brand, text, phone, merchantName } = data;
+  const fontFamily = 'Noto Serif SC';
+  const centerX = Math.round(W / 2);
+  // 宽度缓冲系数
+  const WIDTH_BUFFER = 1.15;
+
+  let zIndex = 1;
+  const children = [];
+
+  // 背景
+  children.push({
+    tag: 'Image2', name: 'AI背景',
+    x: 0, y: 0, width: W, height: H,
+    zIndex: zIndex++, draggable: true, editable: true,
+    fill: [{ type: 'image', url: bgImageUrl }],
+  });
+
+  // 品牌名
+  if (brand) {
+    const nameSize = Math.round(H * 0.28);
+    const tw = estimateWidth(brand, nameSize);
+    children.push({
+      tag: 'Text', name: '品牌名称',
+      x: centerX - Math.round(tw / 2), y: Math.round(H * 0.38 - nameSize * 0.75),
+      width: Math.round(tw * WIDTH_BUFFER), height: nameSize * 1.5,
+      text: brand, fontFamily, fontSize: nameSize, fontWeight: 'bold',
+      textAlign: 'center',
+      zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFFFFF' }],
+    });
+  }
+
+  // 主文案
+  if (text) {
+    const textSize = Math.round(H * 0.16);
+    const tw = estimateWidth(text, textSize);
+    children.push({
+      tag: 'Text', name: '主文案',
+      x: centerX - Math.round(tw / 2), y: Math.round(H * 0.62 - textSize * 0.75),
+      width: Math.round(tw * WIDTH_BUFFER), height: textSize * 1.5,
+      text: text, fontFamily, fontSize: textSize, fontWeight: 'bold',
+      textAlign: 'center',
+      zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#FFD700' }],
+    });
+  }
+
+  // 联系信息
+  const infoSize = Math.round(H * 0.10);
+  let infoLine = '';
+  if (phone) infoLine += '电话：' + phone;
+  if (merchantName) {
+    if (infoLine) infoLine += '  |  ';
+    infoLine += merchantName;
+  }
+  if (infoLine) {
+    const tw = estimateWidth(infoLine, infoSize);
+    children.push({
+      tag: 'Text', name: '联系信息',
+      x: centerX - Math.round(tw / 2), y: Math.round(H * 0.82 - infoSize * 0.75),
+      width: Math.round(tw * WIDTH_BUFFER), height: infoSize * 1.5,
+      text: infoLine, fontFamily, fontSize: infoSize,
+      textAlign: 'center',
+      zIndex: zIndex++, draggable: true, editable: true,
+      fill: [{ type: 'solid', color: '#EEEEEE' }],
+    });
+  }
+
+  return {
+    tag: 'Frame',
+    name: '车贴',
+    width: W, height: H,
+    fill: [{ type: 'solid', color: '#1a1a3a' }],
+    children,
+  };
+}
+
+module.exports = { renderBackPoster, renderCarSticker, computeLayout, buildLeaferJson, buildFrontLeaferJson, buildCarStickerJson };

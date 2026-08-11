@@ -1,335 +1,555 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 const props = defineProps({
   startDate: { type: String, default: '' },
   endDate: { type: String, default: '' },
 })
-
 const emit = defineEmits(['update:startDate', 'update:endDate'])
 
-// 年月
-const year = ref(new Date().getFullYear())
-const month = ref(new Date().getMonth() + 1)
+// ---- Presets ----
+const presets = [
+  { label: '3天', days: 3 },
+  { label: '7天', days: 7 },
+  { label: '15天', days: 15 },
+  { label: '1个月', days: 30 },
+]
 
-const currentYear = computed(() => year.value)
-const currentMonth = computed(() => month.value)
+const activePreset = ref(null)
 
-// 生成日历网格
-const calendarGrid = computed(() => {
-  const firstDay = new Date(year.value, month.value - 1, 1).getDay()
-  const daysInMonth = new Date(year.value, month.value, 0).getDate()
-
-  const grid = []
-  // 填充前部空白
-  for (let i = 0; i < firstDay; i++) {
-    grid.push(null)
+function applyPreset(preset) {
+  if (activePreset.value === preset.days) {
+    // toggle off
+    clearAll()
+    return
   }
-  for (let d = 1; d <= daysInMonth; d++) {
-    grid.push(d)
+  const today = new Date()
+  const end = new Date(today)
+  end.setDate(end.getDate() + preset.days - 1)
+  emit('update:startDate', fmtDate(today))
+  emit('update:endDate', fmtDate(end))
+  activePreset.value = preset.days
+}
+
+// Sync activePreset when dates change externally
+watch(() => [props.startDate, props.endDate], () => {
+  if (!props.startDate || !props.endDate) {
+    activePreset.value = null
+    return
   }
-  return grid
+  const diff = daysDiff(props.startDate, props.endDate) + 1
+  const match = presets.find(p => p.days === diff)
+  // Also check if startDate is today
+  const todayStr = fmtDate(new Date())
+  if (match && props.startDate === todayStr) {
+    activePreset.value = match.days
+  } else {
+    activePreset.value = null
+  }
 })
 
-const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+// ---- Calendar state ----
+const showCalendar = ref(false)
+const calRef = ref(null)
+const viewYear = ref(new Date().getFullYear())
+const viewMonth = ref(new Date().getMonth()) // 0-based
 
-const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
+const monthLabel = computed(() => `${viewYear.value}年${viewMonth.value + 1}月`)
 
-const formatDate = (d) => {
-  const m = String(month.value).padStart(2, '0')
-  const day = String(d).padStart(2, '0')
-  return `${year.value}-${m}-${day}`
-}
+const weekDays = ['一', '二', '三', '四', '五', '六', '日']
 
-const today = new Date()
-const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+// Build 6-row grid of dates for current view month
+const calGrid = computed(() => {
+  const firstDay = new Date(viewYear.value, viewMonth.value, 1)
+  // getDay(): 0=Sun, adjust to Mon=0
+  let startOffset = firstDay.getDay() - 1
+  if (startOffset < 0) startOffset = 6
 
-// 选择状态
-const selecting = ref(false) // false=选开始, true=选结束
+  const daysInMonth = new Date(viewYear.value, viewMonth.value + 1, 0).getDate()
+  const cells = []
 
-const isInRange = (d) => {
-  if (!d) return false
-  const dateStr = formatDate(d)
-  if (!props.startDate && !props.endDate) return false
-  if (props.startDate && props.endDate) {
-    return dateStr >= props.startDate && dateStr <= props.endDate
+  // Previous month padding
+  const prevMonthDays = new Date(viewYear.value, viewMonth.value, 0).getDate()
+  for (let i = startOffset - 1; i >= 0; i--) {
+    cells.push({
+      day: prevMonthDays - i,
+      date: new Date(viewYear.value, viewMonth.value - 1, prevMonthDays - i),
+      outside: true,
+    })
   }
-  if (props.startDate && selecting.value) {
-    return dateStr >= props.startDate
+
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({
+      day: d,
+      date: new Date(viewYear.value, viewMonth.value, d),
+      outside: false,
+    })
   }
-  return dateStr === props.startDate
+
+  // Next month padding (fill to 42 cells = 6 rows)
+  const remaining = 42 - cells.length
+  for (let d = 1; d <= remaining; d++) {
+    cells.push({
+      day: d,
+      date: new Date(viewYear.value, viewMonth.value + 1, d),
+      outside: true,
+    })
+  }
+
+  return cells
+})
+
+function fmtDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
-const isStart = (d) => {
-  if (!d || !props.startDate) return false
-  return formatDate(d) === props.startDate
+function daysDiff(a, b) {
+  return Math.round((new Date(b) - new Date(a)) / 86400000)
 }
 
-const isEnd = (d) => {
-  if (!d || !props.endDate) return false
-  return formatDate(d) === props.endDate
+function isSameDay(d, dateStr) {
+  return dateStr && fmtDate(d) === dateStr
 }
 
-const isToday = (d) => {
-  if (!d) return false
-  return formatDate(d) === todayStr
+function isToday(d) {
+  return fmtDate(d) === fmtDate(new Date())
 }
 
-const selectDay = (d) => {
-  if (!d) return
-  const dateStr = formatDate(d)
+function isInRange(d) {
+  if (!props.startDate || !props.endDate) return false
+  const ds = fmtDate(d)
+  return ds > props.startDate && ds < props.endDate
+}
 
-  if (!selecting.value) {
-    // 选开始日期
-    emit('update:startDate', dateStr)
+function isStart(d) { return isSameDay(d, props.startDate) }
+function isEnd(d) { return isSameDay(d, props.endDate) }
+
+function prevMonth() {
+  if (viewMonth.value === 0) {
+    viewMonth.value = 11
+    viewYear.value--
+  } else {
+    viewMonth.value--
+  }
+}
+
+function nextMonth() {
+  if (viewMonth.value === 11) {
+    viewMonth.value = 0
+    viewYear.value++
+  } else {
+    viewMonth.value++
+  }
+}
+
+function onDayClick(cell) {
+  const clicked = fmtDate(cell.date)
+
+  if (!props.startDate || (props.startDate && props.endDate)) {
+    // Start fresh
+    emit('update:startDate', clicked)
     emit('update:endDate', '')
-    selecting.value = true
   } else {
-    // 选结束日期
-    if (dateStr < props.startDate) {
-      // 如果结束日期在开始日期之前，交换
+    // Have start, no end
+    if (clicked < props.startDate) {
+      // Clicked before start → swap
       emit('update:endDate', props.startDate)
-      emit('update:startDate', dateStr)
+      emit('update:startDate', clicked)
     } else {
-      emit('update:endDate', dateStr)
+      emit('update:endDate', clicked)
     }
-    selecting.value = false
   }
 }
 
-const prevMonth = () => {
-  if (month.value === 1) {
-    year.value--
-    month.value = 12
-  } else {
-    month.value--
-  }
-}
-
-const nextMonth = () => {
-  if (month.value === 12) {
-    year.value++
-    month.value = 1
-  } else {
-    month.value++
-  }
-}
-
-const reset = () => {
+function clearAll() {
   emit('update:startDate', '')
   emit('update:endDate', '')
-  selecting.value = false
+  activePreset.value = null
 }
 
-const formatDisplay = (dateStr) => {
-  if (!dateStr) return ''
-  const parts = dateStr.split('-')
-  return `${parts[0]}年${parseInt(parts[1])}月${parseInt(parts[2])}日`
+// ---- Toggle calendar ----
+function toggleCalendar() {
+  showCalendar.value = !showCalendar.value
+  if (showCalendar.value && props.startDate) {
+    const d = new Date(props.startDate)
+    viewYear.value = d.getFullYear()
+    viewMonth.value = d.getMonth()
+  }
 }
+
+// ---- Click outside ----
+function handleClickOutside(e) {
+  if (calRef.value && !calRef.value.contains(e.target)) {
+    showCalendar.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', handleClickOutside))
+onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutside))
+
+// ---- Display text ----
+const startDisplay = computed(() => props.startDate || '开始日期')
+const endDisplay = computed(() => props.endDate || '结束日期')
+const daysBetween = computed(() => {
+  if (!props.startDate || !props.endDate) return 0
+  return daysDiff(props.startDate, props.endDate) + 1
+})
 </script>
 
 <template>
-  <div class="calendar-picker">
-    <div class="date-display">
-      <div class="date-field" :class="{ active: !selecting && startDate, active: selecting }">
-        <span class="date-label">开始日期</span>
-        <span class="date-value">{{ formatDisplay(startDate) || '请选择' }}</span>
-      </div>
-      <span class="date-arrow">→</span>
-      <div class="date-field" :class="{ active: selecting && endDate }">
-        <span class="date-label">结束日期</span>
-        <span class="date-value">{{ formatDisplay(endDate) || '请选择' }}</span>
-      </div>
+  <div class="crp">
+    <!-- Preset chips -->
+    <div class="crp__presets">
+      <button
+        v-for="p in presets"
+        :key="p.days"
+        :class="['md3-chip', activePreset === p.days ? 'md3-chip--selected' : 'md3-chip--outlined']"
+        @click="applyPreset(p)"
+      >
+        {{ p.label }}
+      </button>
     </div>
 
-    <div class="calendar-box">
-      <div class="calendar-header">
-        <button class="month-btn" @click="prevMonth">‹</button>
-        <span class="month-title">{{ year }}年 {{ monthNames[month - 1] }}</span>
-        <button class="month-btn" @click="nextMonth">›</button>
-      </div>
+    <!-- Date inputs + calendar -->
+    <div class="crp__inputs" ref="calRef">
+      <button class="crp__field" @click="toggleCalendar">
+        <svg class="crp__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span :class="['crp__value', { 'crp__value--empty': !startDate }]">{{ startDisplay }}</span>
+      </button>
+      <span class="crp__arrow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </span>
+      <button class="crp__field" @click="toggleCalendar">
+        <svg class="crp__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span :class="['crp__value', { 'crp__value--empty': !endDate }]">{{ endDisplay }}</span>
+      </button>
 
-      <div class="weekday-row">
-        <span v-for="w in weekdays" :key="w" class="weekday">{{ w }}</span>
-      </div>
+      <!-- Calendar dropdown -->
+      <Transition name="crp-drop">
+        <div v-if="showCalendar" class="crp__cal">
+          <!-- Month nav -->
+          <div class="crp__cal-head">
+            <button class="crp__nav-btn" @click="prevMonth">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="crp__cal-title">{{ monthLabel }}</span>
+            <button class="crp__nav-btn" @click="nextMonth">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
 
-      <div class="days-grid">
-        <template v-for="d in calendarGrid" :key="d">
-          <span v-if="d === null" class="day empty"></span>
-          <button
-            v-else
-            :class="[
-              'day',
-              { 'in-range': isInRange(d) },
-              { 'range-start': isStart(d) },
-              { 'range-end': isEnd(d) },
-              { today: isToday(d) },
-            ]"
-            @click="selectDay(d)"
-          >
-            {{ d }}
-          </button>
-        </template>
-      </div>
+          <!-- Weekday headers -->
+          <div class="crp__week-row">
+            <span v-for="w in weekDays" :key="w" class="crp__week-cell">{{ w }}</span>
+          </div>
+
+          <!-- Day grid -->
+          <div class="crp__day-grid">
+            <button
+              v-for="(cell, i) in calGrid"
+              :key="i"
+              :class="[
+                'crp__day',
+                {
+                  'crp__day--outside': cell.outside,
+                  'crp__day--today': isToday(cell.date),
+                  'crp__day--start': isStart(cell.date),
+                  'crp__day--end': isEnd(cell.date),
+                  'crp__day--range': isInRange(cell.date),
+                },
+              ]"
+              @click="onDayClick(cell)"
+            >
+              {{ cell.day }}
+            </button>
+          </div>
+        </div>
+      </Transition>
     </div>
 
-    <div class="calendar-footer">
-      <span class="hint-text">{{ selecting ? '请选择结束日期' : '请选择开始日期' }}</span>
-      <button class="clear-btn" @click="reset">清除</button>
+    <!-- Footer -->
+    <div class="crp__footer">
+      <span v-if="daysBetween > 0" class="crp__info">共 {{ daysBetween }} 天</span>
+      <button v-if="startDate || endDate" class="crp__clear" @click="clearAll">清除</button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.calendar-picker {
-  background: #0d0d1a;
-  border: 1px solid #2a2a4a;
-  border-radius: 12px;
-  padding: 16px;
+.crp {
   width: 100%;
-  max-width: 380px;
 }
 
-.date-display {
+/* ---- Presets ---- */
+.crp__presets {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #1e1e3a;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
-.date-field {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
-  text-align: center;
-  transition: all 0.2s;
-}
-
-.date-field.active {
-  border-color: #FFD700;
-  background: rgba(255, 215, 0, 0.06);
-}
-
-.date-label {
-  display: block;
-  font-size: 11px;
-  color: #888;
-  margin-bottom: 2px;
-}
-
-.date-value {
-  font-size: 13px;
-  color: #ccc;
-}
-
-.date-field.active .date-value { color: #FFD700; }
-
-.date-arrow { color: #555; font-size: 16px; }
-
-.calendar-box { margin-bottom: 12px; }
-
-.calendar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.month-btn {
-  background: transparent;
-  border: 1px solid #2a2a4a;
-  color: #ccc;
-  width: 32px;
+.md3-chip {
   height: 32px;
-  border-radius: 8px;
-  font-size: 18px;
+  padding: 0 16px;
+  border-radius: var(--md-shape-small);
+  font-size: var(--md-label-large);
+  font-weight: 500;
+  font-family: var(--md-font-family);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.month-btn:hover { border-color: #FFD700; color: #FFD700; }
-
-.month-title { font-size: 15px; font-weight: 600; color: #e0e0e0; }
-
-.weekday-row {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  margin-bottom: 4px;
+.md3-chip--outlined {
+  background: transparent;
+  border: 1px solid var(--md-outline);
+  color: var(--md-on-surface);
+}
+.md3-chip--outlined:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
-.weekday {
-  text-align: center;
-  font-size: 11px;
-  color: #666;
-  padding: 4px 0;
+.md3-chip--selected {
+  background: var(--md-primary-container);
+  border: none;
+  color: var(--md-on-primary-container);
+}
+.md3-chip--selected:hover {
+  box-shadow: var(--md-elevation-1);
 }
 
-.days-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
+/* ---- Date fields ---- */
+.crp__inputs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
 }
 
-.day {
-  aspect-ratio: 1;
+.crp__field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-extra-small);
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--md-font-family);
+  transition: border-color var(--md-duration-short4) var(--md-easing-standard);
+}
+.crp__field:hover {
+  border-color: var(--md-on-surface);
+}
+
+.crp__icon {
+  flex-shrink: 0;
+  color: var(--md-on-surface-variant);
+  opacity: 0.7;
+}
+
+.crp__value {
+  font-size: var(--md-body-medium);
+  color: var(--md-on-surface);
+  white-space: nowrap;
+}
+.crp__value--empty {
+  color: var(--md-on-surface-variant);
+  opacity: 0.6;
+}
+
+.crp__arrow {
+  display: flex;
+  align-items: center;
+  color: var(--md-on-surface-variant);
+  flex-shrink: 0;
+}
+
+/* ---- Calendar dropdown ---- */
+.crp__cal {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--md-surface-container);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-medium);
+  box-shadow: var(--md-elevation-2);
+  padding: 10px;
+  min-width: 260px;
+}
+
+.crp-drop-enter-active {
+  transition: all var(--md-duration-short4) var(--md-easing-emphasized-decel);
+}
+.crp-drop-leave-active {
+  transition: all var(--md-duration-short3) var(--md-easing-emphasized-accel);
+}
+.crp-drop-enter-from,
+.crp-drop-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scaleY(0.95);
+}
+
+/* Calendar header */
+.crp__cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.crp__cal-title {
+  font-size: var(--md-body-medium);
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+
+.crp__nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--md-shape-full);
+  border: none;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: #bbb;
-  cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--md-duration-short4) var(--md-easing-standard);
+}
+.crp__nav-btn:hover {
+  background: var(--md-surface-container-highest);
 }
 
-.day:hover { background: rgba(255, 215, 0, 0.1); }
+/* Weekday row */
+.crp__week-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 2px;
+}
 
-.day.empty { cursor: default; }
+.crp__week-cell {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
+  padding: 2px 0;
+}
 
-.day.in-range {
-  background: rgba(255, 215, 0, 0.12);
+/* Day grid */
+.crp__day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.crp__day {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--md-shape-full);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+  cursor: pointer;
+  font-family: var(--md-font-family);
+  transition: all var(--md-duration-short3) var(--md-easing-standard);
+  position: relative;
+}
+
+.crp__day:hover {
+  background: color-mix(in srgb, var(--md-primary) 12%, transparent);
+}
+
+.crp__day--outside {
+  color: var(--md-on-surface-variant);
+  opacity: 0.35;
+}
+
+.crp__day--today {
+  box-shadow: inset 0 0 0 1.5px var(--md-primary);
+}
+
+.crp__day--start,
+.crp__day--end {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  font-weight: 600;
+}
+.crp__day--start:hover,
+.crp__day--end:hover {
+  background: var(--md-primary);
+  filter: brightness(1.1);
+}
+
+.crp__day--range {
+  background: color-mix(in srgb, var(--md-primary) 12%, transparent);
   border-radius: 0;
 }
-
-.day.range-start,
-.day.range-end {
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
-  color: #000;
-  font-weight: 700;
-  border-radius: 8px;
+.crp__day--start {
+  border-radius: var(--md-shape-full) 0 0 var(--md-shape-full);
+}
+.crp__day--end {
+  border-radius: 0 var(--md-shape-full) var(--md-shape-full) 0;
+}
+.crp__day--start.crp__day--end {
+  border-radius: var(--md-shape-full);
 }
 
-.day.range-start { border-radius: 8px 0 0 8px; }
-.day.range-end { border-radius: 0 8px 8px 0; }
-.day.range-start.range-end { border-radius: 8px; }
-
-.day.today {
-  border: 1px solid #555;
-}
-
-.calendar-footer {
+/* ---- Footer ---- */
+.crp__footer {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding-top: 10px;
-  border-top: 1px solid #1e1e3a;
+  justify-content: space-between;
+  margin-top: 6px;
+  min-height: 18px;
 }
 
-.hint-text { font-size: 11px; color: #666; }
+.crp__info {
+  font-size: var(--md-body-small);
+  color: var(--md-primary);
+  font-weight: 500;
+}
 
-.clear-btn {
+.crp__clear {
   background: transparent;
   border: none;
-  color: #FF6B6B;
-  font-size: 12px;
+  font-size: var(--md-body-small);
+  color: var(--md-on-surface-variant);
   cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--md-shape-small);
+  font-family: var(--md-font-family);
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  margin-left: auto;
+}
+.crp__clear:hover {
+  background: var(--md-surface-container-high);
+  color: var(--md-on-surface);
 }
 
-.clear-btn:hover { text-decoration: underline; }
+/* ---- Responsive ---- */
+@media (max-width: 480px) {
+  .crp__inputs {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .crp__arrow {
+    transform: rotate(90deg);
+  }
+}
 </style>

@@ -3,6 +3,10 @@ import { createPinia } from 'pinia'
 import piniaPersistedstate from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 
+import './styles/md3-tokens.css'
+import './styles/global.css'
+import './styles/md3-components.css'
+
 const pinia = createPinia()
 pinia.use(piniaPersistedstate)
 

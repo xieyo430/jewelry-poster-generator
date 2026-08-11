@@ -4,41 +4,32 @@ import { usePosterStore } from '../../store/poster'
 
 const store = usePosterStore()
 
-const festivalName = computed(() => {
-  if (!store.festival) return null
-  const f = store.festivals.find(f => f.id === store.festival)
-  return f?.name
-})
-
-const brandName = computed(() => {
-  if (!store.brand) return null
-  const b = store.brands.find(b => b.id === store.brand)
-  return b?.name
-})
+const festivalName = computed(() => store.festivals.find(f => f.id === store.festival)?.name)
+const brandName = computed(() => store.brands.find(b => b.id === store.brand)?.name)
 
 const infoItems = computed(() => {
   const items = []
   if (festivalName.value) items.push({ label: '节日', value: festivalName.value })
   if (brandName.value) items.push({ label: '品牌', value: brandName.value })
-  if (store.startDate) items.push({ label: '开始', value: store.startDate })
-  if (store.endDate) items.push({ label: '结束', value: store.endDate })
+  if (store.startDate) items.push({ label: '时间', value: store.startDate + (store.endDate ? ' ~ ' + store.endDate : '') })
   if (store.theme) items.push({ label: '主题', value: store.theme })
-  if (store.subtitle) items.push({ label: '副标题', value: store.subtitle })
-  if (store.mainPromotion.content) items.push({ label: '主爆点', value: store.mainPromotion.content.slice(0, 20) + (store.mainPromotion.content.length > 20 ? '...' : '') })
-  if (store.secondaryPromotion.content) items.push({ label: '次爆点', value: store.secondaryPromotion.content.slice(0, 20) + (store.secondaryPromotion.content.length > 20 ? '...' : '') })
-  if (store.activities.length) items.push({ label: '反面活动', value: `${store.activities.length} 个` })
+  if (store.mainPromotion.content) {
+    const text = store.mainPromotion.content
+    items.push({ label: '主爆点', value: text.length > 18 ? text.slice(0, 18) + '...' : text })
+  }
+  if (store.activities.length) items.push({ label: '活动', value: `${store.activities.length} 个` })
   if (store.merchantInfo.name) items.push({ label: '商家', value: store.merchantInfo.name })
   return items
 })
 </script>
 
 <template>
-  <div class="info-panel" v-if="infoItems.length">
-    <h3>已填写信息</h3>
+  <div v-if="infoItems.length" class="md3-card md3-card--filled info-panel">
+    <div class="info-header">已填信息</div>
     <div class="info-list">
-      <div v-for="item in infoItems" :key="item.label" class="info-item">
+      <div v-for="item in infoItems" :key="item.label" class="info-row">
         <span class="info-label">{{ item.label }}</span>
-        <span class="info-value" :class="item.type || ''">{{ item.value }}</span>
+        <span class="info-value">{{ item.value }}</span>
       </div>
     </div>
   </div>
@@ -46,31 +37,43 @@ const infoItems = computed(() => {
 
 <style scoped>
 .info-panel {
-  background: #13132b;
-  border-radius: 12px;
   padding: 16px;
-  border: 1px solid #1e1e3a;
 }
 
-.info-panel h3 {
-  font-size: 12px;
+.info-header {
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #666;
   letter-spacing: 1px;
-  margin-bottom: 12px;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 14px;
 }
 
-.info-list { display: flex; flex-direction: column; gap: 8px; }
-
-.info-item {
+.info-list {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.info-label { color: #888; }
-.info-value { color: #ccc; max-width: 150px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.info-value.success { color: #2ecc71; }
+.info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.info-label {
+  font-size: var(--md-label-medium);
+  font-weight: 500;
+  color: var(--md-on-surface-variant);
+  flex-shrink: 0;
+  min-width: 48px;
+}
+
+.info-value {
+  font-size: var(--md-body-small);
+  color: var(--md-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

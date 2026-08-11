@@ -1,0 +1,50 @@
+/* ========================================
+   Global Reset + Font Import
+   ======================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: 16px;
+}
+
+body {
+  font-family: var(--md-font-family);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  line-height: 1.5;
+  min-height: 100vh;
+  transition: background-color 0.3s var(--md-easing-standard),
+              color 0.3s var(--md-easing-standard);
+}
+
+input, button, textarea, select {
+  font-family: inherit;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--md-outline-variant); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--md-outline); }
+
+/* Selection */
+::selection {
+  background: rgba(59, 116, 241, 0.2);
+  color: var(--md-on-surface);
+}
+
+/* Transitions for dynamic color */
+a { color: var(--md-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }

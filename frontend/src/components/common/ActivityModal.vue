@@ -1,105 +1,180 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { presetActivities } from '../../data/presetActivities'
 import api from '../../api'
 import DiscountTypeSelect from './DiscountTypeSelect.vue'
 
 const props = defineProps({
+  show: { type: Boolean, default: false },
+  activity: { type: Object, default: null },
   discountTypes: { type: Array, default: () => [] },
-  visible: Boolean,
-  editData: { type: Object, default: null },
 })
+const emit = defineEmits(['update:show', 'save'])
 
-const emit = defineEmits(['close', 'save'])
-
-// 表单状态
+// Form state
 const activityType = ref('text')
 const discountTypeId = ref('')
 const content = ref('')
 const discountDetail = ref('')
 const highlight = ref('')
 const imageUrls = ref([])
-const bgColor = ref('#1e1e3a')
-const showCustomBg = ref(false)
 const fieldValues = ref({})
 
-// AI 智能填充
+// AI state
 const rawDescription = ref('')
 const aiLoading = ref(false)
+const aiError = ref(false)
 const showAiInput = ref(true)
 
-const currentDiscountType = computed(() => {
-  return props.discountTypes.find(d => d.id === discountTypeId.value)
-})
+// Preset picker state
+const showPicker = ref(false)
+const activeCategory = ref('')
+const searchQuery = ref('')
 
-watch(activityType, () => {
-  imageUrls.value = []
-})
+const currentDiscountType = computed(() => props.discountTypes.find(d => d.id === discountTypeId.value))
 
-watch(discountTypeId, () => {
-  fieldValues.value = {}
-  discountDetail.value = ''
-})
-
-// 编辑模式：预填表单
-watch(() => props.editData, (val) => {
-  if (val) {
-    activityType.value = val.type || 'text'
-    discountTypeId.value = val.discountTypeId || ''
-    content.value = val.content || ''
-    discountDetail.value = val.discountDetail || ''
-    highlight.value = val.highlight || ''
-    imageUrls.value = [...(val.imageUrls || [])]
-    bgColor.value = val.bgColor || '#1e1e3a'
-    fieldValues.value = { ...(val.fieldValues || {}) }
-    showAiInput.value = false
+// Group presets by discount type
+const groupedActivities = computed(() => {
+  const groups = {}
+  for (const act of presetActivities) {
+    const key = act.discountType || '其他'
+    if (!groups[key]) groups[key] = []
+    groups[key].push(act)
   }
-}, { immediate: true })
+  return groups
+})
 
+const categoryList = computed(() => Object.keys(groupedActivities.value))
+
+const filteredActivities = computed(() => {
+  const acts = groupedActivities.value[activeCategory.value] || []
+  if (!searchQuery.value) return acts
+  const q = searchQuery.value.toLowerCase()
+  return acts.filter(a => (a.discountDetail || a.content || '').toLowerCase().includes(q))
+})
+
+// Auto-fill from edit data
+watch(() => props.show, (val) => {
+  if (val && props.activity) {
+    activityType.value = props.activity.type || 'text'
+    discountTypeId.value = props.activity.discountTypeId || ''
+    content.value = props.activity.content || ''
+    discountDetail.value = props.activity.discountDetail || ''
+    highlight.value = props.activity.highlight || ''
+    imageUrls.value = [...(props.activity.imageUrls || [])]
+    fieldValues.value = { ...(props.activity.fieldValues || {}) }
+    showAiInput.value = false
+  } else if (val) {
+    resetForm()
+  }
+})
+
+watch(activityType, () => { imageUrls.value = [] })
+watch(discountTypeId, () => {
+  if (!props.activity) {
+    fieldValues.value = {}
+    discountDetail.value = ''
+  }
+})
+
+// Auto-format detail from field values
 watch(fieldValues, (vals) => {
   const dt = currentDiscountType.value
   if (dt && dt.format) {
     let detail = dt.format
-    for (const [k, v] of Object.entries(vals)) {
-      detail = detail.replace(`{${k}}`, v || '___')
-    }
+    for (const [k, v] of Object.entries(vals)) detail = detail.replace(`{${k}}`, v || '___')
     discountDetail.value = detail
   }
 }, { deep: true })
 
-// AI 分析填充
+const computeHighlight = (fv, detail) => {
+  if (!fv) return ''
+  if (fv.item) return fv.item
+  if (fv.reduce) return '减'
+  if (fv.gift) return detail?.includes('赠') ? '赠' : '送'
+  if (fv.bonus) return '送'
+  if (fv.expand) return '抵'
+  if (detail) {
+    const numbers = detail.match(/\d+/g)
+    if (numbers?.length) return numbers[numbers.length - 1]
+  }
+  return ''
+}
+
+const selectPreset = async (act) => {
+  const savedFV = act.fieldValues ? { ...act.fieldValues } : {}
+  activityType.value = act.type || 'text'
+  discountTypeId.value = act.discountTypeId || ''
+  content.value = act.content || ''
+  discountDetail.value = act.discountDetail || ''
+  imageUrls.value = [...(act.imageUrls || [])]
+  await nextTick()
+  if (Object.keys(savedFV).length) fieldValues.value = { ...savedFV }
+  highlight.value = computeHighlight(savedFV, act.discountDetail)
+  showAiInput.value = false
+  showPicker.value = false
+}
+
 const handleAiAnalyze = async () => {
   if (!rawDescription.value.trim()) return
   aiLoading.value = true
+  aiError.value = false
   try {
     const res = await api.post('/ai/analyze-activity', { rawDescription: rawDescription.value })
     const data = res.data
     if (data.success) {
-      // 匹配折扣类型
-      if (data.suggestedDiscountType && data.suggestedDiscountType !== 'custom') {
+      // 兼容两种返回格式：完整格式和简化格式
+      const savedFV = data.fieldValues || {}
+      const savedDetail = data.discountDetail || ''
+
+      // 尝试匹配优惠类型
+      if (data.suggestedDiscountType && data.suggestedDiscountType !== 'custom' && data.suggestedDiscountType !== '类型ID') {
         const dt = props.discountTypes.find(d => d.id === data.suggestedDiscountType)
-        if (dt) {
-          discountTypeId.value = data.suggestedDiscountType
+        if (dt) discountTypeId.value = data.suggestedDiscountType
+      }
+
+      // 如果没有fieldValues但有直接字段，尝试自动匹配
+      if (!Object.keys(savedFV).length) {
+        // 检查返回数据中是否有已知的字段key
+        const knownKeys = ['spend', 'reduce', 'rate', 'item', 'price', 'buyCondition', 'gift', 'oldItem', 'newItem', 'extra', 'benefit', 'condition', 'points', 'recharge', 'bonus', 'time', 'people', 'items', 'amount', 'way', 'prizes', 'deposit', 'expand', 'period', 'tier1', 'tier2', 'tier3', 'customContent']
+        for (const key of knownKeys) {
+          if (data[key] !== undefined) {
+            savedFV[key] = data[key]
+          }
+        }
+        // 如果有rate和item，自动设置为折扣类型
+        if (savedFV.rate && savedFV.item && !discountTypeId.value) {
+          discountTypeId.value = 'discount-rate'
         }
       }
-      // 填充字段值
-      if (data.fieldValues) {
-        fieldValues.value = { ...data.fieldValues }
-      }
-      // 填充描述
-      if (data.discountDetail) {
-        discountDetail.value = data.discountDetail
-        content.value = data.discountDetail
-      } else if (data.activityContent) {
-        content.value = data.activityContent
-      }
+
+      await nextTick()
+      if (Object.keys(savedFV).length) fieldValues.value = { ...savedFV }
+      if (savedDetail) { discountDetail.value = savedDetail; content.value = savedDetail }
+      else if (data.activityContent && data.activityContent !== '10-20字摘要') content.value = data.activityContent
+      highlight.value = computeHighlight(savedFV, savedDetail)
       showAiInput.value = false
+    } else {
+      aiError.value = true
     }
-  } catch (err) {
-    console.error('AI分析失败:', err)
+  } catch {
+    aiError.value = true
   } finally {
     aiLoading.value = false
   }
 }
+
+const handleUpload = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  try {
+    const res = await api.uploadImage(file)
+    if (res.data.success) imageUrls.value.push(res.data.url)
+  } catch { /* ignore */ }
+  e.target.value = ''
+}
+
+const removeImage = (idx) => imageUrls.value.splice(idx, 1)
 
 const resetForm = () => {
   activityType.value = 'text'
@@ -108,17 +183,18 @@ const resetForm = () => {
   discountDetail.value = ''
   highlight.value = ''
   imageUrls.value = []
-  bgColor.value = '#1e1e3a'
   fieldValues.value = {}
   rawDescription.value = ''
   showAiInput.value = true
+  showPicker.value = false
+  searchQuery.value = ''
+  activeCategory.value = ''
 }
 
 const handleSave = () => {
   if (!discountTypeId.value) return
-
   const activity = {
-    id: props.editData?.id || Date.now(),
+    id: props.activity?.id || Date.now(),
     type: activityType.value,
     discountType: props.discountTypes.find(d => d.id === discountTypeId.value)?.name || discountTypeId.value,
     discountTypeId: discountTypeId.value,
@@ -126,338 +202,342 @@ const handleSave = () => {
     discountDetail: discountDetail.value,
     highlight: (highlight.value && discountDetail.value && discountDetail.value.includes(highlight.value)) ? highlight.value : '',
     imageUrls: [...imageUrls.value],
-    bgColor: bgColor.value,
     fieldValues: { ...fieldValues.value },
   }
-
   emit('save', activity)
-  resetForm()
+  close()
 }
-
-const handleUpload = async (e) => {
-  const file = e.target.files?.[0]
-  if (!file) return
-  try {
-    const res = await api.uploadImage(file)
-    if (res.data.success) {
-      imageUrls.value.push(res.data.url)
-    }
-  } catch (err) {
-    console.error('上传失败:', err)
-  }
-  e.target.value = ''
-}
-
-const removeImage = (idx) => {
-  imageUrls.value.splice(idx, 1)
-}
-
-const bgColors = ['#1e1e3a', '#2d1b69', '#1a3a4a', '#3a1a2a', '#1a3a2a', '#3a2a1a', '#2a1a3a', '#1a2a3a']
 
 const close = () => {
   resetForm()
-  emit('close', props.editData?.id || null)
+  emit('update:show', false)
 }
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="modal-overlay" v-if="visible" @click.self="close">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2>添加活动</h2>
-          <button class="close-btn" @click="close">✕</button>
-        </div>
+    <Transition name="modal-fade">
+      <div v-if="show" class="md3-dialog-overlay" @click.self="close">
+        <div class="md3-dialog activity-dialog">
+          <h2 class="md3-dialog__title">
+            {{ activity ? '编辑活动' : '添加活动' }}
+          </h2>
 
-        <div class="modal-body">
-          <!-- AI 智能填充 -->
-          <div class="field-group" v-if="showAiInput">
-            <label>📝 粘贴活动描述，AI 自动填写</label>
-            <div class="ai-input-area">
-              <textarea
-                v-model="rawDescription"
-                class="text-input textarea"
-                placeholder="复制粘贴活动文案到这里，AI会自动分析并填充以下信息&#10;&#10;例如：活动期间全场珠宝满1000减200，买任意项链送银饰手链一条，会员享双倍积分"
-                rows="4"
-              ></textarea>
-              <button
-                class="btn btn-ai"
-                @click="handleAiAnalyze"
-                :disabled="aiLoading || !rawDescription.trim()"
-              >
-                <span v-if="aiLoading" class="btn-loading">
-                  <span class="spinner-small"></span> AI分析中...
-                </span>
-                <span v-else>🤖 AI 智能填充</span>
-              </button>
-            </div>
-            <div class="ai-divider">
-              <span>或者手动填写</span>
-            </div>
-          </div>
-
-          <!-- 活动类型 -->
-          <div class="field-group">
-            <label>活动类型</label>
-            <div class="type-selector">
-              <button :class="['type-btn', { active: activityType === 'text' }]" @click="activityType = 'text'">纯文字</button>
-              <button :class="['type-btn', { active: activityType === 'single_image' }]" @click="activityType = 'single_image'">单图+文字</button>
-              <button :class="['type-btn', { active: activityType === 'multi_image' }]" @click="activityType = 'multi_image'">多图+文字</button>
-            </div>
-          </div>
-
-          <!-- 优惠类型 -->
-          <div class="field-group">
-            <label>优惠类型 <span class="required">*</span></label>
-            <DiscountTypeSelect v-model="discountTypeId" :discount-types="discountTypes" placeholder="请选择优惠类型" />
-          </div>
-
-          <!-- 活动内容 -->
-          <div class="field-group">
-            <label>活动内容</label>
-            <textarea
-              v-model="content"
-              class="text-input textarea"
-              placeholder="活动内容（AI填充后会自动填入）"
-              rows="2"
-            ></textarea>
-          </div>
-
-          <!-- 优惠字段 -->
-          <div class="field-group" v-if="currentDiscountType">
-            <label>{{ currentDiscountType.inputPrompts }}</label>
-            <div v-for="field in currentDiscountType.fields" :key="field.key" class="sub-field">
-              <span class="sub-label">{{ field.label }}</span>
-              <input
-                v-model="fieldValues[field.key]"
-                :type="field.type"
-                :placeholder="field.placeholder"
-                class="text-input"
-              />
-            </div>
-          </div>
-
-          <!-- 预览 -->
-          <div class="field-group" v-if="discountDetail">
-            <label>优惠详情预览</label>
-            <div class="detail-preview">{{ discountDetail }}</div>
-          </div>
-
-          <!-- 突出信息 -->
-          <div class="field-group" v-if="discountDetail">
-            <label>突出信息 <span class="optional">（输入要突出的文字，必须是上面优惠详情中的内容）</span></label>
-            <input
-              v-model="highlight"
-              class="text-input"
-              :placeholder="'如：' + (discountDetail.slice(0, 6) || '满减')"
-            />
-          </div>
-
-          <!-- 图片上传 -->
-          <div class="field-group" v-if="activityType !== 'text'">
-            <label>图片</label>
-            <div class="image-list">
-              <div v-for="(url, idx) in imageUrls" :key="idx" class="image-item">
-                <img :src="url" alt="活动图片" />
-                <button class="remove-img" @click="removeImage(idx)">✕</button>
+          <div class="md3-dialog__content">
+            <!-- AI Smart Fill -->
+            <div v-if="showAiInput" class="ai-section">
+              <label class="field-label">粘贴活动描述，AI 自动填写</label>
+              <div class="ai-box">
+                <textarea
+                  v-model="rawDescription"
+                  class="md3-field__textarea"
+                  placeholder="复制粘贴活动文案到这里，AI 会自动分析并填充"
+                  rows="3"
+                ></textarea>
+                <div v-if="aiError" class="md3-alert md3-alert--error" style="margin-top: 8px">
+                  AI 分析失败，请检查文案后重试
+                </div>
+                <button
+                  class="md3-btn md3-btn--outlined"
+                  style="width: 100%; margin-top: 8px"
+                  :disabled="!rawDescription.trim() || aiLoading"
+                  @click="handleAiAnalyze"
+                >
+                  <span v-if="aiLoading" class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
+                  <span v-else>AI 智能填充</span>
+                </button>
+              </div>
+              <div class="md3-divider" style="margin: 16px 0">
+                <span class="divider-text">或者手动填写</span>
               </div>
             </div>
-            <label class="upload-btn" v-if="activityType === 'multi_image' || (activityType === 'single_image' && !imageUrls.length)">
-              选择图片
-              <input type="file" accept="image/*" @change="handleUpload" hidden />
-            </label>
-          </div>
 
-          <!-- 背景颜色 -->
-          <div class="field-group">
-            <label>模块背景色</label>
-            <div class="color-picker">
-              <button
-                v-for="c in bgColors"
-                :key="c"
-                :class="['color-option', { active: bgColor === c }]"
-                :style="{ background: c }"
-                @click="bgColor = c"
-              ></button>
-              <button :class="['color-option', 'custom', { active: showCustomBg }]" @click="showCustomBg = !showCustomBg">🎨</button>
+            <!-- Preset picker button -->
+            <div class="preset-section">
+              <button class="md3-btn md3-btn--tonal" style="width: 100%" @click="showPicker = true">
+                从预设活动中选择
+              </button>
             </div>
-            <input v-if="showCustomBg" v-model="bgColor" class="text-input" placeholder="#RRGGBB" style="margin-top:8px" />
-          </div>
-        </div>
 
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="close">取消</button>
-          <button class="btn btn-primary" @click="handleSave" :disabled="!discountTypeId">
-            保存活动
-          </button>
+            <!-- Activity type -->
+            <div class="field-group">
+              <label class="field-label">活动类型</label>
+              <div class="md3-segmented-group">
+                <button
+                  :class="['md3-segmented-btn', { 'md3-segmented-btn--selected': activityType === 'text' }]"
+                  @click="activityType = 'text'"
+                >纯文字</button>
+                <button
+                  :class="['md3-segmented-btn', { 'md3-segmented-btn--selected': activityType === 'single_image' }]"
+                  @click="activityType = 'single_image'"
+                >单图+文字</button>
+                <button
+                  :class="['md3-segmented-btn', { 'md3-segmented-btn--selected': activityType === 'multi_image' }]"
+                  @click="activityType = 'multi_image'"
+                >多图+文字</button>
+              </div>
+            </div>
+
+            <!-- Discount type -->
+            <div class="field-group">
+              <label class="field-label">优惠类型 <span class="req-star">*</span></label>
+              <DiscountTypeSelect
+                :model-value="discountTypeId"
+                :discount-types="discountTypes"
+                placeholder="请选择优惠类型"
+                @update:model-value="discountTypeId = $event"
+              />
+            </div>
+
+            <!-- Dynamic fields -->
+            <div v-if="currentDiscountType?.fields?.length" class="field-group">
+              <label class="field-label">{{ currentDiscountType.inputPrompts }}</label>
+              <div v-for="field in currentDiscountType.fields" :key="field.key" class="sub-field">
+                <span class="sub-label">{{ field.label }}</span>
+                <input
+                  class="md3-field__input md3-field--outlined"
+                  :value="fieldValues[field.key] || ''"
+                  @input="fieldValues[field.key] = $event.target.value"
+                  :placeholder="field.placeholder"
+                />
+              </div>
+            </div>
+
+            <!-- Content -->
+            <div class="field-group">
+              <label class="field-label">活动内容</label>
+              <textarea
+                v-model="content"
+                class="md3-field__textarea"
+                placeholder="活动内容描述"
+                rows="2"
+              ></textarea>
+            </div>
+
+            <!-- Detail preview -->
+            <div v-if="discountDetail" class="field-group">
+              <label class="field-label">优惠详情预览</label>
+              <div class="preview-box">{{ discountDetail }}</div>
+            </div>
+
+            <!-- Highlight -->
+            <div v-if="discountDetail" class="field-group">
+              <label class="field-label">突出信息 <span class="opt-tag">必须是优惠详情中的内容</span></label>
+              <input
+                v-model="highlight"
+                class="md3-field__input md3-field--outlined"
+                :placeholder="'如：' + (discountDetail.slice(0, 6) || '满减')"
+              />
+            </div>
+
+            <!-- Image upload -->
+            <div v-if="activityType !== 'text'" class="field-group">
+              <label class="field-label">图片</label>
+              <div class="img-list">
+                <div v-for="(url, idx) in imageUrls" :key="idx" class="img-thumb">
+                  <img :src="url" alt="" />
+                  <button class="img-remove" @click="removeImage(idx)">&#10005;</button>
+                </div>
+              </div>
+              <label
+                v-if="activityType === 'multi_image' || (activityType === 'single_image' && !imageUrls.length)"
+                class="upload-area"
+              >
+                + 选择图片
+                <input type="file" accept="image/*" @change="handleUpload" hidden />
+              </label>
+            </div>
+          </div>
+
+          <div class="md3-dialog__actions">
+            <button class="md3-btn md3-btn--text" @click="close">取消</button>
+            <button class="md3-btn md3-btn--filled" :disabled="!discountTypeId" @click="handleSave">
+              {{ activity ? '保存修改' : '保存活动' }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
+
+    <!-- Preset picker sub-dialog -->
+    <Transition name="modal-fade">
+      <div v-if="showPicker" class="md3-dialog-overlay" @click.self="showPicker = false">
+        <div class="md3-dialog picker-dialog">
+          <h2 class="md3-dialog__title">选择预设活动</h2>
+          <div class="md3-dialog__content picker-content">
+            <div class="picker-sidebar">
+              <div class="picker-search">
+                <input v-model="searchQuery" class="picker-search-input" placeholder="搜索..." />
+              </div>
+              <div
+                v-for="cat in categoryList"
+                :key="cat"
+                :class="['picker-nav', { 'picker-nav--active': activeCategory === cat }]"
+                @click="activeCategory = cat; searchQuery = ''"
+              >
+                {{ cat }}
+                <span class="picker-nav-count">{{ (groupedActivities[cat] || []).length }}</span>
+              </div>
+            </div>
+            <div class="picker-body">
+              <div v-if="!activeCategory" class="picker-placeholder">请从左侧选择分类</div>
+              <button
+                v-for="(act, idx) in filteredActivities"
+                :key="idx"
+                class="picker-card"
+                @click="selectPreset(act)"
+              >
+                <span class="picker-card-text">{{ act.discountDetail || act.content }}</span>
+              </button>
+              <div v-if="activeCategory && !filteredActivities.length" class="picker-placeholder">
+                未找到匹配的活动
+              </div>
+            </div>
+          </div>
+          <div class="md3-dialog__actions">
+            <button class="md3-btn md3-btn--text" @click="showPicker = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+.activity-dialog {
+  max-width: 560px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 20px;
+  flex-direction: column;
 }
 
-.modal-content {
-  background: #0d0d1a;
-  border: 1px solid #2a2a4a;
-  border-radius: 16px;
-  width: 100%;
-  max-width: 560px;
-  max-height: 90vh;
+.activity-dialog :deep(.md3-dialog__content) {
+  flex: 1;
   overflow-y: auto;
 }
 
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 24px 0;
-}
-
-.modal-header h2 { font-size: 18px; color: #FFD700; }
-
-.close-btn {
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 18px;
-  cursor: pointer;
-}
-.close-btn:hover { color: #fff; }
-
-.modal-body { padding: 20px 24px; }
-
-.field-group { margin-bottom: 18px; }
-.field-group label { display: block; font-size: 13px; color: #aaa; margin-bottom: 8px; }
-.required { color: #FF6B6B; }
-.optional { color: #777; font-weight: normal; font-size: 12px; }
-
-/* AI输入区 */
-.ai-input-area {
-  background: rgba(255, 215, 0, 0.03);
-  border: 1px solid rgba(255, 215, 0, 0.15);
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.btn-ai {
-  width: 100%;
-  margin-top: 8px;
-  padding: 10px;
-  border: 1px solid #FFD700;
-  border-radius: 8px;
-  background: rgba(255, 215, 0, 0.08);
-  color: #FFD700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-ai:hover { background: rgba(255, 215, 0, 0.15); }
-.btn-ai:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.btn-loading { display: flex; align-items: center; justify-content: center; gap: 8px; }
-
-.spinner-small {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 215, 0, 0.3);
-  border-top-color: #FFD700;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.ai-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 16px 0 8px;
-  color: #555;
-  font-size: 12px;
-}
-
-.ai-divider::before,
-.ai-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: #2a2a4a;
-}
-
-.type-selector { display: flex; gap: 8px; }
-
-.type-btn {
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
-  background: transparent;
-  color: #aaa;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
-}
-
-.type-btn.active { border-color: #FFD700; color: #FFD700; background: rgba(255, 215, 0, 0.08); }
-
-.select-input, .text-input {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
-  background: #0d0d1a;
-  color: #f5f5f5;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.select-input:focus, .text-input:focus { border-color: #FFD700; }
-.select-input option { background: #0d0d1a; color: #f5f5f5; }
-.text-input::placeholder { color: #555; }
-
-.textarea { resize: vertical; min-height: 80px; }
-
-.sub-field { margin-bottom: 10px; }
-.sub-field:last-child { margin-bottom: 0; }
-.sub-label { display: block; font-size: 12px; color: #999; margin-bottom: 4px; }
-
-.detail-preview {
-  padding: 10px 14px;
-  background: #0a0a15;
-  border: 1px dashed #2a2a4a;
-  border-radius: 8px;
-  color: #FFD700;
-  font-size: 14px;
-}
-
-.image-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-
-.image-item {
-  position: relative;
-  width: 80px;
-  height: 80px;
-  border-radius: 8px;
+.picker-dialog {
+  max-width: 560px;
+  width: 90vw;
+  max-height: 80vh;
   overflow: hidden;
-  border: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
 }
 
-.image-item img { width: 100%; height: 100%; object-fit: cover; }
+.field-group {
+  margin-bottom: 16px;
+}
 
-.remove-img {
+.field-label {
+  display: block;
+  font-size: var(--md-label-large);
+  font-weight: 500;
+  color: var(--md-on-surface);
+  margin-bottom: 6px;
+}
+
+.req-star {
+  color: var(--md-error);
+}
+
+.opt-tag {
+  font-size: 11px;
+  color: var(--md-on-surface-variant);
+  font-weight: 400;
+}
+
+.ai-section {
+  margin-bottom: 8px;
+}
+
+.ai-box {
+  padding: 12px;
+  background: var(--md-surface-container-low);
+  border-radius: var(--md-shape-small);
+}
+
+.ai-box .md3-field__textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.preset-section {
+  margin-bottom: 16px;
+}
+
+.sub-field {
+  margin-bottom: 10px;
+}
+
+.sub-label {
+  display: block;
+  font-size: var(--md-label-small);
+  color: var(--md-on-surface-variant);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.sub-field .md3-field__input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.preview-box {
+  padding: 10px 12px;
+  background: var(--md-surface-container-low);
+  border-radius: var(--md-shape-small);
+  color: var(--md-on-surface);
+  font-size: var(--md-body-medium);
+  font-weight: 500;
+}
+
+textarea {
+  font-family: var(--md-font-family);
+}
+
+textarea.md3-field__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-size: var(--md-body-medium);
+  resize: vertical;
+  outline: none;
+}
+
+textarea.md3-field__textarea:focus {
+  border-color: var(--md-primary);
+}
+
+.img-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.img-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--md-shape-small);
+  overflow: hidden;
+  border: 1px solid var(--md-outline-variant);
+}
+
+.img-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.img-remove {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -465,7 +545,7 @@ const close = () => {
   height: 20px;
   border-radius: 50%;
   border: none;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0, 0, 0, 0.5);
   color: #fff;
   font-size: 10px;
   cursor: pointer;
@@ -474,65 +554,173 @@ const close = () => {
   justify-content: center;
 }
 
-.upload-btn {
+.upload-area {
   display: inline-flex;
-  padding: 8px 16px;
-  border: 1px dashed #2a2a4a;
-  border-radius: 8px;
-  color: #aaa;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
-}
-
-.upload-btn:hover { border-color: #FFD700; color: #FFD700; }
-
-.color-picker {
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-}
-
-.color-option {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid transparent;
+  padding: 8px 14px;
+  border: 1px dashed var(--md-outline-variant);
+  border-radius: var(--md-shape-small);
+  color: var(--md-on-surface-variant);
   cursor: pointer;
-  transition: all 0.2s;
+  font-size: var(--md-label-large);
+  font-weight: 500;
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
 }
 
-.color-option.active { border-color: #FFD700; transform: scale(1.15); }
-.color-option.custom { background: #1e1e3a; font-size: 12px; display: flex; align-items: center; justify-content: center; }
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px 20px;
-  border-top: 1px solid #2a2a4a;
+.upload-area:hover {
+  border-color: var(--md-primary);
+  color: var(--md-primary);
 }
 
-.btn {
-  padding: 10px 24px;
-  border-radius: 8px;
+.md3-divider {
+  position: relative;
   border: none;
-  font-size: 14px;
+  height: 1px;
+  background: var(--md-outline-variant);
+  margin: 16px 0;
+}
+
+.divider-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--md-surface);
+  padding: 0 12px;
+  font-size: var(--md-label-small);
+  color: var(--md-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* Picker sub-dialog */
+.picker-content {
+  display: flex;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  flex: 1;
+}
+
+.picker-sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--md-outline-variant);
+  overflow: visible;
+  padding: 8px 0;
+}
+
+.picker-search {
+  padding: 0 8px 8px;
+}
+
+.picker-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-extra-small);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-size: var(--md-body-small);
+  font-family: var(--md-font-family);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.picker-search-input:focus {
+  border-color: var(--md-primary);
+}
+
+.picker-nav {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  border-left: 2px solid transparent;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.btn-primary {
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
-  color: #000;
+.picker-nav:hover {
+  color: var(--md-on-surface);
+  background: var(--md-surface-container-low);
+}
+
+.picker-nav--active {
+  color: var(--md-on-surface);
   font-weight: 600;
+  background: var(--md-surface-container-low);
+  border-left-color: var(--md-primary);
 }
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.btn-secondary {
-  background: transparent;
-  border: 1px solid #2a2a4a;
-  color: #aaa;
+.picker-nav-count {
+  font-size: 11px;
+  color: var(--md-outline);
+  background: var(--md-surface-container);
+  padding: 1px 6px;
+  border-radius: 10px;
 }
-.btn-secondary:hover { border-color: #888; color: #e0e0e0; }
+
+.picker-body {
+  flex: 1;
+  padding: 12px;
+  overflow: visible;
+  columns: 2;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: start;
+}
+
+.picker-card {
+  display: block;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface);
+  cursor: pointer;
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  font-family: var(--md-font-family);
+}
+
+.picker-card:hover {
+  background: var(--md-surface-container-low);
+  border-color: var(--md-primary);
+}
+
+.picker-card-text {
+  font-size: var(--md-body-small);
+  color: var(--md-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.picker-placeholder {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px 16px;
+  font-size: var(--md-body-small);
+  color: var(--md-on-surface-variant);
+}
+
+/* Transitions */
+.modal-fade-enter-active {
+  transition: all var(--md-duration-medium2) var(--md-easing-standard);
+}
+.modal-fade-leave-active {
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+.modal-fade-enter-from .md3-dialog {
+  transform: translateY(16px) scale(0.95);
+}
 </style>

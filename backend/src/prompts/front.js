@@ -198,12 +198,20 @@ function buildFrontPrompt(data) {
   const secondaryName = hexToColorName(secondaryColor) || '辅助色';
   const bgName = hexToColorName(bgColor) || '深色';
 
+  // 收集所有必须显示的文案，用引号明确标出
+  const allTexts = [brand, theme, subtitle, mainTitle, subTitle, secMainTitle, secSubTitle].filter(Boolean);
+
   const parts = [];
 
-  // 严格声明：海报上只能出现引号内的文案
+  // 严格声明
   parts.push('你是一个专业海报设计师，正在生成一张竖版高端珠宝促销海报。');
   parts.push('');
-  parts.push('最重要的规则：海报上出现的全部文字必须且只能是下面用引号括起来的文案内容。不允许出现任何其他文字、标签、标题、注释、说明性文字。');
+  parts.push('【最重要的规则】');
+  parts.push('海报上允许出现的文字有且仅有以下这些，用引号标出，多一个字都不行：');
+  allTexts.forEach(t => parts.push(`  "${t}"`));
+  if (startDate && endDate) parts.push(`  "${startDate} 至 ${endDate}"`);
+  else if (startDate) parts.push(`  "${startDate}起"`);
+  parts.push('除以上文字外，海报上不得出现任何其他文字、数字、字母、标签、注释、说明、水印。');
   parts.push('');
 
   // 整体风格
@@ -215,68 +223,107 @@ function buildFrontPrompt(data) {
 
   // 布局
   parts.push('');
-  parts.push('海报从上到下分为三个部分：');
+  parts.push('海报从上到下分为三个区域：');
 
   // 品牌
   parts.push('');
-  parts.push(`第一部分：海报最顶部居中显示品牌名"${brand}"，字体精致优雅，使用书法体或衬线体，紧凑不占过多空间。`);
+  parts.push(`顶部区域：海报最顶部居中显示"${brand}"，字体精致优雅，使用书法体或衬线体，紧凑不占过多空间。`);
 
   // 主题+时间
   parts.push('');
-  parts.push('第二部分：海报中央偏上的视觉中心位置。');
+  parts.push('中部区域：海报中央偏上的视觉中心位置。');
   if (theme) {
-    parts.push(`显示活动主题"${theme}"，字体非常大而醒目，加粗突出，居中对齐，使用华丽艺术字体效果，可带有描金或发光效果。`);
+    parts.push(`显示"${theme}"，字体非常大而醒目，加粗突出，居中对齐，使用华丽艺术字体效果，可带有描金或发光效果。`);
   }
   if (subtitle) {
-    parts.push(`主题下方显示副标题"${subtitle}"，字体明显小于主题，居中排列，纤细优雅。`);
+    parts.push(`下方显示"${subtitle}"，字体明显小于主题，居中排列，纤细优雅。`);
   }
   if (startDate && endDate) {
-    parts.push(`副标题下方显示活动时间"${startDate} 至 ${endDate}"，字体小巧精致。`);
+    parts.push(`再下方显示"${startDate} 至 ${endDate}"，字体小巧精致。`);
   } else if (startDate) {
-    parts.push(`副标题下方显示活动时间"${startDate}起"，字体小巧，居中。`);
+    parts.push(`再下方显示"${startDate}起"，字体小巧，居中。`);
   }
 
   // 爆点活动
   parts.push('');
-  parts.push(`第三部分：海报下方大面积区域，这是整个海报最重要的促销核心，视觉权重必须最高。海报下方中央放置一个${primaryName}系圆角矩形色块，色块外围有一圈纤细的${secondaryName}描边，无外层白色包裹，背景铺满。色块占据海报下方约一半的面积，占据海报最大视觉比重。`);
+  parts.push(`下半部区域：海报下方大面积区域，这是整个海报最重要的促销核心。下方中央放置一个${primaryName}系圆角矩形色块，色块外围有一圈纤细的${secondaryName}描边。色块占据海报下方约一半面积。`);
 
-  // 主爆点
+  // 上方大字
   if (mainTitle) {
-    parts.push(`在色块内居中显示主标题"${mainTitle}"，字号非常大而醒目，使用特大号加粗白色字体，带有发光或描边效果，确保一眼就能看到。`);
-    // 检查标题中是否包含价格数字
+    parts.push(`在色块内居中显示"${mainTitle}"，字号非常大而醒目，使用特大号加粗白色字体，带有发光或描边效果，确保一眼就能看到。`);
     if (/\d+/.test(mainTitle)) {
-      parts.push(`主标题中的价格数字（如${mainTitle.match(/\d+/g)?.join('、')}）必须额外突出处理：使用更大的字号、加粗、颜色改为金色或鎏金色，与周围白色文字形成明显对比，让价格数字成为视觉焦点。`);
+      const nums = mainTitle.match(/\d+/g)?.join('、');
+      parts.push(`其中的价格数字${nums}必须额外突出：更大字号、加粗、颜色改为金色或鎏金色，与周围白色文字形成对比。`);
     }
   }
   if (subTitle) {
-    parts.push(`主标题下方居中显示副标题"${subTitle}"，字号明显小于主标题，使用纤细优雅的白色字体。`);
+    parts.push(`下方居中显示"${subTitle}"，字号明显小于上方文字，使用纤细优雅的白色字体。`);
   }
 
   // 分割线
   if (mainTitle && secMainTitle) {
-    parts.push('在主爆点和次爆点之间，居中显示一条纤细的金色水平分割线，长度约为色块宽度的三分之一，线条细腻精致。');
+    parts.push('上下两组文字之间，居中显示一条纤细的金色水平分割线，长度约为色块宽度的三分之一。');
   }
 
-  // 次爆点
+  // 下方大字
   if (secMainTitle) {
-    parts.push(`分割线下方居中显示次爆点主标题"${secMainTitle}"，字号与上方主标题接近，使用特大号加粗白色字体，带有发光效果。`);
+    parts.push(`分割线下方居中显示"${secMainTitle}"，字号与上方大字接近，使用特大号加粗白色字体，带有发光效果。`);
   }
   if (secSubTitle) {
-    parts.push(`次爆点主标题下方居中显示副标题"${secSubTitle}"，字号明显小于主标题，使用纤细优雅的白色字体。`);
+    parts.push(`再下方居中显示"${secSubTitle}"，字号明显小于大字，使用纤细优雅的白色字体。`);
   }
 
-  // 约束 — 纯自然语言，无任何标签
+  // 约束
   parts.push('');
-  parts.push('严格遵守以下约束：');
-  parts.push('- 海报上只能出现上面引号内的文案，不允许出现任何其他文字、标签、标题、注释');
-  parts.push('- 文案内容必须一字不改原样展示，不得增删改');
-  parts.push('- 同一信息只展示一次，不能重复出现');
-  parts.push('- 所有文字颜色必须与背景色形成足够对比，确保清晰可读');
-  parts.push('- 不得出现任何色号、十六进制颜色代码、RGB数值、百分比数字、坐标、像素值或任何技术参数');
-  parts.push('- 不得出现"AI生成"、"AIGC"等水印字样，不得包含任何水印、平台标识');
-  parts.push('- 背景必须铺满整张海报，从最顶部到最底部，不留任何空白区域');
+  parts.push('【严格约束】');
+  parts.push('- 海报上只显示上面引号内的文案，一字不改原样展示，不得增删改');
+  parts.push('- 同一文案只出现一次，不能重复');
+  parts.push('- 所有文字颜色必须与背景形成足够对比，确保清晰可读');
+  parts.push('- 严禁出现色号、RGB值、百分比、坐标等任何技术参数');
+  parts.push('- 严禁出现"AI生成"、水印、平台标识');
+  parts.push('- 背景铺满整张海报，不留空白');
 
   return parts.join('\n');
 }
 
-module.exports = { buildFrontPrompt, getFestivalBgDesign };
+/**
+ * 正面海报背景提示词 — AI只画背景，文字由Leafer UI渲染
+ */
+function buildFrontBgPrompt(data) {
+  const { colorScheme, primaryColor, secondaryColor, bgColor, festivalId } = data;
+
+  const primaryName = hexToColorName(primaryColor) || '主色';
+  const secondaryName = hexToColorName(secondaryColor) || '辅助色';
+  const bgName = hexToColorName(bgColor) || '深色';
+
+  const parts = [];
+  parts.push('生成一张竖版纯装饰背景图，这是珠宝促销海报的正面。');
+  parts.push('');
+  parts.push('【配色】');
+  parts.push(`- 整体色调：以${bgName}为主基调，${primaryName}为辅助色调`);
+  parts.push(`- 渐变：从画面顶部的${bgName}自然过渡到底部的${primaryName}`);
+  parts.push(`- ${secondaryName}仅作为极少量的光晕点缀，不可大面积使用`);
+  parts.push('');
+  parts.push('【背景设计】');
+  parts.push(getFestivalBgDesign(festivalId));
+  parts.push('');
+  parts.push('【风格要求】');
+  parts.push('- 海报从上到下分为三个视觉区域：顶部品牌区、中部主题区、下半部促销区');
+  parts.push(`- 顶部区域：简洁干净，大面积${bgName}渐变，为品牌名留白`);
+  parts.push(`- 中部区域：${primaryName}渐变过渡，装饰元素逐渐增多`);
+  parts.push('- 下半部促销区：最华丽的装饰区域，珠宝光效、节日元素集中在此');
+  parts.push('- 装饰元素分布在画面四周和边缘，丰富但不遮挡中央文字区域');
+  parts.push('- 整张画面铺满，不留空白边缘');
+  parts.push('');
+  parts.push('【禁止】');
+  parts.push('- 任何文字、数字、字母、符号');
+  parts.push('- 色号、代码、百分比、坐标等技术参数');
+  parts.push('- 水印、logo、平台标识');
+  parts.push('- 黑边、留白、未绘制区域');
+  parts.push('- 线框、方框、矩形框、网格线');
+  parts.push('- 任何几何形状的边框或轮廓线');
+
+  return parts.join('\n');
+}
+
+module.exports = { buildFrontPrompt, buildFrontBgPrompt, getFestivalBgDesign };

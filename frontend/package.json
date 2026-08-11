@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "axios": "^1.7.7",
+    "naive-ui": "^2.40.0",
     "pinia": "^2.2.4",
     "pinia-plugin-persistedstate": "^3.2.3",
     "vue": "^3.5.12",
@@ -17,6 +18,8 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.4",
+    "unplugin-auto-import": "^0.16.7",
+    "unplugin-vue-components": "^0.25.2",
     "vite": "^5.4.11"
   }
 }

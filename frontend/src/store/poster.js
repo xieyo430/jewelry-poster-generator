@@ -3,7 +3,7 @@ import api from '../api'
 
 export const usePosterStore = defineStore('poster', {
   persist: {
-    omit: ['generating', 'generateError'],
+    omit: ['generating', 'generateError', 'enhancing', 'enhanceError', 'mainCached', 'secCached', 'enhancedFrontUrl', 'enhancedBackUrl', 'backBgImageUrl'],
   },
   state: () => ({
     currentStep: 1,
@@ -51,7 +51,7 @@ export const usePosterStore = defineStore('poster', {
       imageUrls: [],
     },
     secCached: {
-      hasSecondary: false,
+      hasSecondary: true,
       type: 'text',
       discountTypeId: '',
       fieldValues: {},
@@ -64,7 +64,6 @@ export const usePosterStore = defineStore('poster', {
       name: '',
       address: '',
       phone: '',
-      wechat: '',
     },
     selectedMerchantTemplateId: null,
 
@@ -77,6 +76,13 @@ export const usePosterStore = defineStore('poster', {
     carStickerUrl: null,
     generating: false,
     generateError: null,
+
+    // AI 优化
+    enhancing: false,
+    enhanceError: null,
+    enhancedFrontUrl: null,   // 优化后的正面（原图保留不动）
+    enhancedBackUrl: null,    // 优化后的反面（原图保留不动）
+    backBgImageUrl: null,     // 反面海报的背景图 URL
   }),
 
   getters: {
@@ -86,36 +92,37 @@ export const usePosterStore = defineStore('poster', {
 
     colorScheme: (s) => {
       if (!s.festival) return null
-      const f = s.festivals.find(f => f.id === s.festival)
+      const f = s.festivals?.find(f => f.id === s.festival)
       return f ? f.colorScheme : null
     },
     festivalColors: (s) => {
       if (!s.festival) return null
-      const f = s.festivals.find(f => f.id === s.festival)
+      const f = s.festivals?.find(f => f.id === s.festival)
       return f ? { primary: f.primaryColor, secondary: f.secondaryColor, bg: f.bgColor } : null
     },
   },
 
   actions: {
     async loadStaticData() {
-      try {
-        const [brandsRes, festivalsRes, discountRes, merchantRes] = await Promise.all([
-          api.getBrands(),
-          api.getFestivals(),
-          api.getDiscountTypes(),
-          api.getMerchantTemplates(),
-        ])
-        this.brands = brandsRes.data.brands
-        this.festivals = festivalsRes.data.festivals
-        this.discountTypes = discountRes.data.discountTypes
-        this.merchantTemplates = merchantRes.data.merchantTemplates
-      } catch (e) {
-        console.error('加载静态数据失败:', e)
-      }
+      const results = await Promise.allSettled([
+        api.getBrands(),
+        api.getFestivals(),
+        api.getDiscountTypes(),
+        api.getMerchantTemplates(),
+      ])
+      if (results[0].status === 'fulfilled') this.brands = results[0].value.data.brands
+      else console.error('加载品牌失败:', results[0].reason)
+      if (results[1].status === 'fulfilled') this.festivals = results[1].value.data.festivals
+      else console.error('加载节日失败:', results[1].reason)
+      if (results[2].status === 'fulfilled') this.discountTypes = results[2].value.data.discountTypes
+      else console.error('加载优惠类型失败:', results[2].reason)
+      if (results[3].status === 'fulfilled') this.merchantTemplates = results[3].value.data.merchantTemplates
+      else console.error('加载商家模板失败:', results[3].reason)
     },
 
     setStep(n) {
       this.currentStep = n
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     },
 
     updateMainCache(data) {
@@ -137,25 +144,28 @@ export const usePosterStore = defineStore('poster', {
     syncMainContent() {
       const parts = [this.mainPromotion.mainTitle, this.mainPromotion.subTitle].filter(Boolean)
       this.mainPromotion.content = parts.join('\n')
-      this.mainPromotion.discountDetail = this.mainPromotion.content
     },
 
     syncSecContent() {
       const parts = [this.secondaryPromotion.mainTitle, this.secondaryPromotion.subTitle].filter(Boolean)
       this.secondaryPromotion.content = parts.join('\n')
-      this.secondaryPromotion.discountDetail = this.secondaryPromotion.content
     },
 
     async generatePosters() {
       this.generating = true
       this.generateError = null
-      const brandName = this.brands.find(b => b.id === this.brand)?.name || this.brand
+      this.enhancedFrontUrl = null
+      this.enhancedBackUrl = null
+      this._abortController = new AbortController()
+      const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
 
       try {
         const colors = this.festivalColors || {}
+        const signal = this._abortController.signal
 
         const frontData = {
           brand: brandName,
+          brandId: this.brand,
           theme: this.theme,
           subtitle: this.subtitle,
           startDate: this.startDate,
@@ -185,24 +195,38 @@ export const usePosterStore = defineStore('poster', {
         }
 
         const [frontRes, backRes] = await Promise.all([
-          api.generateFrontPoster(frontData),
-          api.generateBackPoster(backData),
+          api.generateFrontPoster(frontData, signal),
+          api.generateBackPoster(backData, signal),
         ])
 
         this.frontPosterUrl = frontRes.data.imageUrl
         this.backPosterUrl = backRes.data.imageUrl
+        this.backBgImageUrl = backRes.data.bgImageUrl || null
       } catch (e) {
-        console.error('海报生成失败:', e)
-        this.generateError = e.message || '生成失败'
+        if (e.code === 'ERR_CANCELED' || e.name === 'CanceledError' || e.name === 'AbortError') {
+          this.generateError = null
+          this.frontPosterUrl = null
+          this.backPosterUrl = null
+        } else {
+          console.error('海报生成失败:', e)
+          this.generateError = e.message || '生成失败'
+        }
       } finally {
         this.generating = false
+        this._abortController = null
+      }
+    },
+
+    cancelGenerate() {
+      if (this._abortController) {
+        this._abortController.abort()
       }
     },
 
     async generateCarSticker() {
       this.generating = true
       this.generateError = null
-      const brandName = this.brands.find(b => b.id === this.brand)?.name || this.brand
+      const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
 
       try {
         const colors = this.festivalColors || {}
@@ -254,6 +278,67 @@ export const usePosterStore = defineStore('poster', {
     updateActivity(id, data) {
       const idx = this.activities.findIndex(a => a.id === id)
       if (idx !== -1) this.activities[idx] = { ...this.activities[idx], ...data }
+    },
+
+    async addCustomMerchant(data) {
+      const res = await api.addCustomMerchant(data)
+      this.merchantTemplates.push(res.data.merchant)
+      return res.data.merchant
+    },
+
+    async deleteCustomMerchant(id) {
+      await api.deleteCustomMerchant(id)
+      this.merchantTemplates = this.merchantTemplates.filter(m => m.id !== id)
+      if (this.selectedMerchantTemplateId === id) {
+        this.selectedMerchantTemplateId = null
+        this.merchantInfo = { name: '', address: '', phone: '' }
+      }
+    },
+
+    async enhancePoster({ type = 'overall', target = 'back' }) {
+      this.enhancing = true
+      this.enhanceError = null
+
+      try {
+        const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
+        const colors = this.festivalColors || {}
+
+        const isBack = target === 'back'
+        const payload = {
+          imageUrl: isBack ? this.backPosterUrl : this.frontPosterUrl,
+          posterType: target,
+          bgImageUrl: this.backBgImageUrl,
+          type,
+          activities: this.activities,
+          merchantInfo: this.merchantInfo,
+          brand: brandName,
+          primaryColor: colors.primary || '',
+          secondaryColor: colors.secondary || '',
+          bgColor: colors.bg || '',
+        }
+
+        const res = await api.enhancePoster(payload)
+        if (res.data.success) {
+          if (isBack) {
+            this.enhancedBackUrl = res.data.imageUrl
+            if (res.data.bgImageUrl) this.backBgImageUrl = res.data.bgImageUrl
+          } else {
+            this.enhancedFrontUrl = res.data.imageUrl
+          }
+        }
+      } catch (e) {
+        console.error('海报优化失败:', e)
+        this.enhanceError = e.message || '优化失败'
+      } finally {
+        this.enhancing = false
+      }
+    },
+
+    // 撤销优化（清除优化版本，回到原图）
+    revertEnhancement(target) {
+      if (target === 'front') this.enhancedFrontUrl = null
+      else if (target === 'back') this.enhancedBackUrl = null
+      else { this.enhancedFrontUrl = null; this.enhancedBackUrl = null }
     },
   },
 })

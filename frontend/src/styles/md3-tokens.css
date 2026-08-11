@@ -1,0 +1,100 @@
+/* ========================================
+   Material Design 3 — Design Tokens
+   ======================================== */
+
+:root {
+  /* ---- Color (defaults, overridden dynamically by color.js) ---- */
+  --md-source: #3b74f1;
+
+  --md-primary: #3b74f1;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d8e2ff;
+  --md-on-primary-container: #001a41;
+
+  --md-secondary: #565e71;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #dae2f9;
+  --md-on-secondary-container: #131c2b;
+
+  --md-tertiary: #705575;
+  --md-on-tertiary: #ffffff;
+  --md-tertiary-container: #fad8fd;
+  --md-on-tertiary-container: #28132f;
+
+  --md-error: #ba1a1a;
+  --md-on-error: #ffffff;
+  --md-error-container: #ffdad6;
+  --md-on-error-container: #410002;
+
+  --md-surface: #f9f9ff;
+  --md-surface-dim: #d9d9e0;
+  --md-surface-bright: #f9f9ff;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f3f3fa;
+  --md-surface-container: #ededf4;
+  --md-surface-container-high: #e7e8ee;
+  --md-surface-container-highest: #e2e2e9;
+  --md-on-surface: #1a1b21;
+  --md-on-surface-variant: #44474f;
+
+  --md-outline: #74777f;
+  --md-outline-variant: #c4c6d0;
+
+  --md-inverse-surface: #2f3036;
+  --md-inverse-on-surface: #f1f0f7;
+  --md-inverse-primary: #adc6ff;
+
+  /* ---- Typography ---- */
+  --md-font-family: 'Google Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  --md-display-large: 57px;
+  --md-display-medium: 45px;
+  --md-display-small: 36px;
+  --md-headline-large: 32px;
+  --md-headline-medium: 28px;
+  --md-headline-small: 24px;
+  --md-title-large: 22px;
+  --md-title-medium: 16px;
+  --md-title-small: 14px;
+  --md-body-large: 16px;
+  --md-body-medium: 14px;
+  --md-body-small: 12px;
+  --md-label-large: 14px;
+  --md-label-medium: 12px;
+  --md-label-small: 11px;
+
+  /* ---- Shape ---- */
+  --md-shape-none: 0px;
+  --md-shape-extra-small: 4px;
+  --md-shape-small: 8px;
+  --md-shape-medium: 12px;
+  --md-shape-large: 16px;
+  --md-shape-extra-large: 28px;
+  --md-shape-full: 9999px;
+
+  /* ---- Elevation ---- */
+  --md-elevation-0: none;
+  --md-elevation-1: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15);
+  --md-elevation-2: 0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15);
+  --md-elevation-3: 0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3);
+  --md-elevation-4: 0 6px 10px 4px rgba(0,0,0,0.15), 0 2px 3px rgba(0,0,0,0.3);
+  --md-elevation-5: 0 8px 12px 6px rgba(0,0,0,0.15), 0 4px 4px rgba(0,0,0,0.3);
+
+  /* ---- Motion ---- */
+  --md-duration-short1: 50ms;
+  --md-duration-short2: 100ms;
+  --md-duration-short3: 150ms;
+  --md-duration-short4: 200ms;
+  --md-duration-medium1: 250ms;
+  --md-duration-medium2: 300ms;
+  --md-duration-medium3: 350ms;
+  --md-duration-medium4: 400ms;
+  --md-duration-long1: 450ms;
+  --md-duration-long2: 500ms;
+
+  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-easing-emphasized-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-easing-emphasized-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+}

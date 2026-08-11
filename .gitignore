@@ -1,4 +1,7 @@
 node_modules/
-data/uploads/
+dist/
+data/
 .env
 *.log
+__pycache__/
+*.pyc

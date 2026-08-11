@@ -35,11 +35,13 @@ class StorageService {
 
   async delete(key) {
     const fp = this._filePath(key);
-    if (fs.existsSync(fp)) {
-      fs.unlinkSync(fp);
+    try {
+      await fs.promises.unlink(fp);
       return { success: true };
+    } catch (e) {
+      if (e.code === 'ENOENT') return { success: false, reason: 'not_found' };
+      throw e;
     }
-    return { success: false, reason: 'not_found' };
   }
 }
 

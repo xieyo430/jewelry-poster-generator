@@ -1,85 +1,111 @@
 <script setup>
+import { computed, toRef } from 'vue'
 import { usePosterStore } from '../../store/poster'
-import { storeToRefs } from 'pinia'
+import Md3Card from '../common/Md3Card.vue'
+import Md3Chip from '../common/Md3Chip.vue'
+import Md3Button from '../common/Md3Button.vue'
+import Md3TextField from '../common/Md3TextField.vue'
 import CalendarRangePicker from '../common/CalendarRangePicker.vue'
 
 const store = usePosterStore()
-const { festivals, brands, festival, brand, startDate, endDate, canStep1Next } = storeToRefs(store)
+const festivals = toRef(store, 'festivals')
+const brands = toRef(store, 'brands')
+const festival = toRef(store, 'festival')
+const brand = toRef(store, 'brand')
+const startDate = toRef(store, 'startDate')
+const endDate = toRef(store, 'endDate')
+const canStep1Next = computed(() => store.canStep1Next)
+
+const selectedFestival = (id) => { store.festival = id }
+const selectedBrand = (id) => { store.brand = id }
 </script>
 
 <template>
-  <div class="step-card">
-    <h2 class="step-title">选择节日与品牌</h2>
-    <p class="step-desc">选择节日主题和珠宝品牌，系统将自动匹配配色方案</p>
+  <Md3Card variant="elevated" class="step-card">
+    <!-- Header -->
+    <div class="step-header">
+      <h2 class="step-title">选择节日与品牌</h2>
+      <p class="step-subtitle">选择节日主题和珠宝品牌，系统将自动匹配配色方案</p>
+    </div>
 
-    <!-- 节日选择 -->
+    <!-- 节日主题 (required) -->
     <section class="section">
-      <h3 class="section-title">选择节日 <span class="required">*</span></h3>
-      <div class="festival-grid">
-        <button
+      <div class="section-head">
+        <h3 class="section-label">节日主题</h3>
+        <span class="md3-badge md3-badge--error">必选</span>
+      </div>
+      <div class="chip-scroll">
+        <Md3Chip
           v-for="f in festivals"
           :key="f.id"
-          :class="['festival-btn', { active: festival === f.id }]"
-          :style="festival === f.id ? {
-            borderColor: f.primaryColor,
-            background: `${f.primaryColor}15`,
-          } : {}"
-          @click="store.festival = f.id"
+          :selected="festival === f.id"
+          :dot-color="f.primaryColor"
+          @click="selectedFestival(f.id)"
         >
-          <span class="festival-color" :style="{ background: f.primaryColor }"></span>
-          <span>{{ f.name }}</span>
-        </button>
+          {{ f.name }}
+        </Md3Chip>
       </div>
-      <div v-if="festival" class="color-preview">
-        <span class="color-label">配色：</span>
-        <span
-          v-for="(f, i) in festivals.filter(f => f.id === festival)"
-          :key="i"
-          class="color-swatch-group"
-        >
-          <span class="color-swatch" :style="{ background: f.primaryColor }"></span>
-          <span class="color-swatch" :style="{ background: f.secondaryColor }"></span>
-          <span class="color-swatch" :style="{ background: f.bgColor }"></span>
-          <span class="color-name">{{ f.colorScheme }}</span>
-        </span>
+      <div v-if="festival" class="color-swatch-bar">
+        <template v-for="f in festivals.filter(x => x.id === festival)" :key="f.id">
+          <span class="swatch" :style="{ background: f.primaryColor }" title="主色"></span>
+          <span class="swatch" :style="{ background: f.secondaryColor }" title="辅色"></span>
+          <span class="swatch" :style="{ background: f.bgColor }" title="背景色"></span>
+          <span class="color-scheme-name">{{ f.colorScheme }}</span>
+        </template>
       </div>
     </section>
 
-    <!-- 品牌选择 -->
+    <!-- 珠宝品牌 (required) -->
     <section class="section">
-      <h3 class="section-title">选择品牌 <span class="required">*</span></h3>
+      <div class="section-head">
+        <h3 class="section-label">珠宝品牌</h3>
+        <span class="md3-badge md3-badge--error">必选</span>
+      </div>
       <div class="brand-grid">
-        <button
+        <div
           v-for="b in brands"
           :key="b.id"
-          :class="['brand-btn', { active: brand === b.id }]"
-          @click="store.brand = b.id"
+          :class="['brand-card', { 'brand-card--selected': brand === b.id }]"
+          @click="selectedBrand(b.id)"
         >
-          <div class="brand-icon">{{ b.name.charAt(0) }}</div>
+          <div class="brand-avatar">{{ b.name.charAt(0) }}</div>
           <div class="brand-info">
             <span class="brand-name">{{ b.name }}</span>
             <span class="brand-desc">{{ b.description }}</span>
           </div>
-        </button>
+          <span v-if="brand === b.id" class="brand-check">&#10003;</span>
+        </div>
       </div>
     </section>
 
-    <!-- 活动主题 -->
+    <!-- 活动主题 (optional) -->
     <section class="section">
-      <h3 class="section-title">活动主题 <span class="optional">（选填）</span></h3>
-      <div class="field-group">
-        <input v-model="store.theme" class="text-input" placeholder="例如：七夕浪漫钜惠" />
-        <p class="field-hint">显示在海报正面上方的主标题</p>
+      <div class="section-head">
+        <h3 class="section-label">活动主题</h3>
+        <span class="md3-badge md3-badge--tonal">选填</span>
       </div>
-      <div class="field-group">
-        <input v-model="store.subtitle" class="text-input" placeholder="例如：全场珠宝低至5折，满额赠好礼（选填）" />
-        <p class="field-hint">显示在主标题下方的副标题</p>
+      <div class="field-stack">
+        <Md3TextField
+          :model-value="store.theme"
+          @update:model-value="store.theme = $event"
+          placeholder="例如：七夕浪漫钜惠"
+          variant="outlined"
+        />
+        <Md3TextField
+          :model-value="store.subtitle"
+          @update:model-value="store.subtitle = $event"
+          placeholder="例如：全场珠宝低至5折"
+          variant="outlined"
+        />
       </div>
     </section>
 
-    <!-- 活动时间 -->
+    <!-- 活动时间 (optional) -->
     <section class="section">
-      <h3 class="section-title">活动时间 <span class="optional">（选填）</span></h3>
+      <div class="section-head">
+        <h3 class="section-label">活动时间</h3>
+        <span class="md3-badge md3-badge--tonal">选填</span>
+      </div>
       <CalendarRangePicker
         :start-date="startDate"
         :end-date="endDate"
@@ -88,156 +114,224 @@ const { festivals, brands, festival, brand, startDate, endDate, canStep1Next } =
       />
     </section>
 
-    <!-- 操作按钮 -->
-    <div class="step-actions">
-      <button
-        class="btn btn-primary btn-next"
+    <!-- Action bar -->
+    <div class="md3-card__divider"></div>
+    <div class="action-bar">
+      <span v-if="!canStep1Next" class="validation-hint">
+        <span class="hint-icon">!</span>
+        请先选择<span v-if="!festival">节日</span><span v-if="!festival && !brand">和</span><span v-if="!brand">品牌</span>
+      </span>
+      <Md3Button
+        variant="filled"
         :disabled="!canStep1Next"
         @click="store.setStep(2)"
       >
-        下一步 →
-      </button>
+        下一步 &#8594;
+      </Md3Button>
     </div>
-  </div>
+  </Md3Card>
 </template>
 
 <style scoped>
 .step-card {
-  background: #13132b;
-  border: 1px solid #2a2a4a;
-  border-radius: 16px;
-  padding: 28px;
+  animation: md3-slide-up var(--md-duration-medium2) var(--md-easing-emphasized-decel);
 }
 
-.step-title { font-size: 20px; color: #FFD700; margin-bottom: 4px; }
-.step-desc { font-size: 13px; color: #999; margin-bottom: 24px; }
+.step-header {
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
 
-.section { margin-bottom: 28px; }
-.section-title { font-size: 14px; font-weight: 600; color: #e0e0e0; margin-bottom: 12px; }
-.required { color: #FF6B6B; }
-.optional { color: #888; font-weight: 400; font-size: 12px; }
+.step-title {
+  font-size: var(--md-headline-small);
+  font-weight: 500;
+  color: var(--md-on-surface);
+  letter-spacing: 0;
+  margin-bottom: 6px;
+}
 
-.festival-grid {
+.step-subtitle {
+  font-size: var(--md-body-medium);
+  color: var(--md-on-surface-variant);
+  line-height: 1.5;
+}
+
+/* Section layout */
+.section {
+  margin-bottom: 32px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.section-label {
+  font-size: var(--md-title-small);
+  font-weight: 600;
+  color: var(--md-on-surface);
+  margin: 0;
+}
+
+/* Chip wrap grid */
+.chip-scroll {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.festival-btn {
+/* Color swatch bar */
+.color-swatch-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
-  background: transparent;
-  color: #ccc;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: var(--md-surface-container);
+  border-radius: var(--md-shape-small);
+  animation: md3-fade-in var(--md-duration-short4) var(--md-easing-standard);
 }
 
-.festival-btn:hover { border-color: #777; color: #fff; }
-.festival-btn.active { color: #fff; font-weight: 600; }
-
-.festival-color {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--md-shape-extra-small);
+  border: 1px solid var(--md-outline-variant);
+  transition: transform var(--md-duration-short4) var(--md-easing-standard);
 }
 
-.color-preview { margin-top: 10px; display: flex; align-items: center; gap: 8px; }
-.color-label { font-size: 12px; color: #888; }
-.color-swatch-group { display: flex; align-items: center; gap: 4px; }
-.color-swatch { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #444; }
-.color-name { font-size: 12px; color: #bbb; margin-left: 4px; }
+.swatch:hover {
+  transform: scale(1.15);
+}
 
+.color-scheme-name {
+  font-size: var(--md-label-medium);
+  color: var(--md-on-surface-variant);
+  margin-left: 4px;
+}
+
+/* Brand grid */
 .brand-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 
-.brand-btn {
+@media (max-width: 900px) {
+  .brand-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .brand-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.brand-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid #2a2a4a;
-  border-radius: 10px;
-  background: transparent;
-  color: #ccc;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-medium);
   cursor: pointer;
-  transition: all 0.2s;
-  text-align: left;
+  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  background: var(--md-surface);
 }
 
-.brand-btn:hover { border-color: #777; background: rgba(255,255,255,0.03); }
-.brand-btn.active { border-color: #FFD700; background: rgba(255, 215, 0, 0.06); }
+.brand-card:hover {
+  box-shadow: var(--md-elevation-1);
+  border-color: var(--md-outline);
+}
 
-.brand-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
+.brand-card--selected {
+  border-color: var(--md-primary);
+  border-width: 2px;
+  padding: 15px;
+  background: color-mix(in srgb, var(--md-primary-container) 25%, var(--md-surface));
+}
+
+.brand-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--md-shape-full);
+  background: linear-gradient(135deg, var(--md-primary-container), var(--md-secondary-container));
+  color: var(--md-on-primary-container);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #000;
+  font-size: var(--md-title-medium);
   font-weight: 700;
-  font-size: 16px;
   flex-shrink: 0;
 }
 
-.brand-info { display: flex; flex-direction: column; }
-.brand-name { font-size: 14px; font-weight: 600; }
-.brand-desc { font-size: 11px; color: #888; margin-top: 2px; }
+.brand-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
 
-.brand-btn.active .brand-name { color: #FFD700; }
+.brand-name {
+  font-size: var(--md-body-large);
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
 
-.step-actions {
+.brand-desc {
+  font-size: var(--md-body-small);
+  color: var(--md-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-check {
+  flex-shrink: 0;
+  font-size: 20px;
+  color: var(--md-primary);
+  font-weight: 700;
+}
+
+/* Field stack */
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Action bar */
+.action-bar {
   display: flex;
   justify-content: flex-end;
-  padding-top: 20px;
-  border-top: 1px solid #2a2a4a;
+  align-items: center;
+  gap: 16px;
 }
 
-.btn {
-  padding: 12px 28px;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
+.validation-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--md-body-medium);
+  color: var(--md-on-surface-variant);
 }
 
-.btn-primary {
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
-  color: #000;
-}
-.btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(255, 215, 0, 0.25); }
-
-.field-group { margin-bottom: 16px; }
-.text-input {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
-  background: #0d0d1a;
-  color: #f0f0f0;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.text-input:focus { border-color: #FFD700; }
-.text-input::placeholder { color: #555; }
-.field-hint { font-size: 11px; color: #666; margin-top: 4px; }
-
-@media (max-width: 768px) {
-  .step-card { padding: 20px; }
-  .brand-grid { grid-template-columns: 1fr 1fr; }
+.hint-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--md-shape-full);
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+  font-size: var(--md-label-small);
+  font-weight: 700;
 }
 </style>
