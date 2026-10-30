@@ -12,7 +12,7 @@ if (!fs.existsSync(LOGO_DIR)) fs.mkdirSync(LOGO_DIR, { recursive: true });
 const logoStorage = multer.diskStorage({
   destination: LOGO_DIR,
   filename: (req, file, cb) => {
-    cb(null, `${req.params.code}.png`);
+    cb(null, `${safeBasename(req.params.code)}.png`);
   }
 });
 const logoUpload = multer({
@@ -132,13 +132,9 @@ router.get('/:code/logo', (req, res) => {
 });
 
 // 删除品牌LOGO
-router.delete('/:code/logo', async (req, res) => {
+router.delete('/:code/logo', (req, res) => {
   const logoPath = path.join(LOGO_DIR, `${safeBasename(req.params.code)}.png`);
-  try {
-    await fs.promises.unlink(logoPath);
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
+  if (fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
   res.json({ success: true });
 });
 

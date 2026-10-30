@@ -19,7 +19,10 @@ api.interceptors.response.use(
       || error.message
       || '网络请求失败'
 
-    return Promise.reject(new Error(message))
+    const requestError = new Error(message)
+    requestError.detail = error.response?.data?.detail
+    requestError.status = error.response?.status
+    return Promise.reject(requestError)
   }
 )
 
@@ -86,6 +89,8 @@ export default {
 
   // AI 智能填充（一体化：分析+标题）
   smartFill(rawDescription) { return api.post('/ai/smart-fill', { rawDescription }) },
+  // AI 帮写：基于第一步上下文生成 3 组候选
+  writeCopy(data, signal) { return api.post('/ai/write-copy', data, { signal }) },
 
   // 上传图片
   uploadImage(file) {

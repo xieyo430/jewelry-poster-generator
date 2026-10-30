@@ -1,12 +1,14 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import EdDialog from './EdDialog.vue'
+import EdButton from './EdButton.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
 })
 const emit = defineEmits(['cancel'])
 
-const EST_TOTAL = 30 // 预估总秒数
+const EST_TOTAL = 30
 const elapsed = ref(0)
 let timer = null
 
@@ -29,152 +31,45 @@ const remainText = computed(() => {
   return '即将完成...'
 })
 
-// 进度百分比（0~95 封顶，避免到100%卡住）
 const progress = computed(() => Math.min(95, Math.round((elapsed.value / EST_TOTAL) * 100)))
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="gp-overlay">
-      <div class="gp-dialog">
-        <!-- Spinner -->
-        <div class="gp-spinner">
-          <svg class="gp-ring" width="56" height="56" viewBox="0 0 56 56">
-            <circle cx="28" cy="28" r="24" fill="none" stroke="var(--md-outline-variant)" stroke-width="4"/>
-            <circle cx="28" cy="28" r="24" fill="none" stroke="var(--md-primary)" stroke-width="4"
-              stroke-linecap="round" stroke-dasharray="120" stroke-dashoffset="40" class="gp-arc"/>
-          </svg>
-        </div>
+  <EdDialog
+    v-if="show"
+    title="正在生成海报"
+    :width="400"
+    :close-on-overlay="false"
+    :hide-close="true"
+  >
+    <p class="gp__desc">AI 正在为您设计海报，请耐心等待...</p>
 
-        <!-- Text -->
-        <h3 class="gp-title">正在生成海报</h3>
-        <p class="gp-desc">AI 正在为您设计海报，请耐心等待...</p>
-
-        <!-- Progress bar -->
-        <div class="gp-bar-wrap">
-          <div class="gp-bar" :style="{ width: progress + '%' }"></div>
-        </div>
-
-        <!-- Remaining time -->
-        <p class="gp-time">{{ remainText }}</p>
-
-        <!-- Cancel button -->
-        <button class="gp-cancel" @click="emit('cancel')">
-          停止生成
-        </button>
-      </div>
+    <div class="gp__pct-row">
+      <span class="gp__pct ed-num">{{ progress }}%</span>
     </div>
-  </Teleport>
+    <div class="gp__track">
+      <div class="gp__fill" :style="{ width: progress + '%' }" />
+    </div>
+
+    <p class="gp__time ed-num">{{ remainText }}</p>
+
+    <template #footer>
+      <EdButton variant="text" @click="emit('cancel')">停止生成</EdButton>
+    </template>
+  </EdDialog>
 </template>
 
 <style scoped>
-.gp-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1200;
-  animation: gpFadeIn 0.25s var(--md-easing-emphasized-decel);
-}
+.gp__desc { font-size: 14px; color: var(--ed-ink-soft); margin-bottom: var(--ed-space-5); }
 
-@keyframes gpFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+.gp__pct-row { display: flex; justify-content: flex-end; margin-bottom: var(--ed-space-2); }
+.gp__pct { font-size: var(--ed-label); letter-spacing: .04em; }
 
-.gp-dialog {
-  background: var(--md-surface-container-low);
-  border-radius: var(--md-shape-extra-large);
-  padding: 36px 40px 28px;
-  width: 320px;
-  text-align: center;
-  box-shadow: var(--md-elevation-3);
-  animation: gpSlideIn 0.3s var(--md-easing-emphasized-decel);
-}
+.gp__track { position: relative; height: 4px; overflow: visible; background: color-mix(in srgb, var(--ed-rule) 82%, var(--ed-accent)); border-radius: 999px; }
+.gp__track::after { content: ''; position: absolute; top: 50%; left: 0; width: 34px; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--ed-accent) 38%, transparent); filter: blur(4px); transform: translate(-50%, -50%); animation: gp-sweep 1.4s ease-in-out infinite; }
+.gp__fill { position: relative; z-index: 1; height: 100%; overflow: visible; border-radius: inherit; background: linear-gradient(90deg, var(--ed-accent-deep), var(--ed-accent)); box-shadow: 0 0 10px color-mix(in srgb, var(--ed-accent) 42%, transparent); transition: width 1s linear; }
+.gp__fill::after { content: ''; position: absolute; top: 50%; right: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--ed-paper); box-shadow: 0 0 0 2px var(--ed-accent), 0 0 12px color-mix(in srgb, var(--ed-accent) 72%, transparent); transform: translate(50%, -50%); }
 
-@keyframes gpSlideIn {
-  from { opacity: 0; transform: scale(0.92) translateY(12px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-.gp-spinner {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 20px;
-}
-
-.gp-ring {
-  animation: gpSpin 1.2s linear infinite;
-}
-
-.gp-arc {
-  animation: gpDash 1.5s ease-in-out infinite;
-}
-
-@keyframes gpSpin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes gpDash {
-  0% { stroke-dashoffset: 120; }
-  50% { stroke-dashoffset: 30; }
-  100% { stroke-dashoffset: 120; }
-}
-
-.gp-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--md-on-surface);
-  margin: 0 0 6px;
-}
-
-.gp-desc {
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-  margin: 0 0 16px;
-}
-
-.gp-bar-wrap {
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--md-outline-variant);
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-
-.gp-bar {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--md-primary);
-  transition: width 1s linear;
-}
-
-.gp-time {
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-  margin: 0 0 20px;
-  font-variant-numeric: tabular-nums;
-}
-
-.gp-cancel {
-  height: 40px;
-  padding: 0 24px;
-  border-radius: 20px;
-  border: 1px solid var(--md-outline);
-  background: transparent;
-  color: var(--md-error);
-  font-size: var(--md-label-large);
-  font-weight: 500;
-  font-family: var(--md-font-family);
-  cursor: pointer;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.gp-cancel:hover {
-  background: color-mix(in srgb, var(--md-error) 8%, transparent);
-  border-color: var(--md-error);
-}
+.gp__time { margin-top: var(--ed-space-4); font-size: var(--ed-label); letter-spacing: .04em; color: var(--ed-ink-faint); }
+@keyframes gp-sweep { 0% { left: 0; opacity: 0; } 18% { opacity: .9; } 82% { opacity: .9; } 100% { left: 100%; opacity: 0; } }
 </style>

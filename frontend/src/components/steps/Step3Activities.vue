@@ -1,10 +1,12 @@
 <script setup>
-import { ref, computed, toRef } from 'vue'
+import { ref, computed, toRef, watch } from 'vue'
 import { usePosterStore } from '../../store/poster'
 import { useToast } from '../../composables/useToast'
-import Md3Card from '../common/Md3Card.vue'
-import Md3Button from '../common/Md3Button.vue'
-import Md3TextField from '../common/Md3TextField.vue'
+import EdSection from '../common/EdSection.vue'
+import EdButton from '../common/EdButton.vue'
+import EdField from '../common/EdField.vue'
+import EdIcon from '../common/EdIcon.vue'
+import EdDialog from '../common/EdDialog.vue'
 import ActivityModal from '../common/ActivityModal.vue'
 import GenerateProgressDialog from '../common/GenerateProgressDialog.vue'
 
@@ -14,6 +16,14 @@ const activities = toRef(store, 'activities')
 const merchantInfo = toRef(store, 'merchantInfo')
 const discountTypes = toRef(store, 'discountTypes')
 const merchantTemplates = toRef(store, 'merchantTemplates')
+const brandName = computed(() => store.displayBrandName || '')
+const industryTemplate = computed(() => store.industryTemplate)
+const compatibleMerchantTemplates = computed(() => {
+  if (store.industry !== 'jewelry') return []
+  const name = brandName.value.trim()
+  if (!name) return []
+  return merchantTemplates.value.filter(t => t.name.includes(name))
+})
 const canStep3Next = computed(() => store.canStep3Next)
 const generating = toRef(store, 'generating')
 const generateError = toRef(store, 'generateError')
@@ -48,18 +58,16 @@ function handleCloseModal() {
   editingActivity.value = null
 }
 
-function confirmRemoveActivity(act) {
-  if (confirm(`确定删除活动"${act.discountType || ''}"吗？`)) {
-    store.removeActivity(act.id)
+const pendingDeleteAct = ref(null)
+
+function askDeleteAct(act) { pendingDeleteAct.value = act.id }
+
+function confirmDeleteAct() {
+  if (pendingDeleteAct.value !== null) {
+    store.removeActivity(pendingDeleteAct.value)
     toast.success('活动已删除')
   }
-}
-
-function activityTypeLabel(type) {
-  if (type === 'text') return '纯文字'
-  if (type === 'single_image') return '单图'
-  if (type === 'multi_image') return '多图'
-  return type
+  pendingDeleteAct.value = null
 }
 
 /* ---------- Merchant management ---------- */
@@ -78,6 +86,32 @@ function selectMerchantTemplate(templateId) {
     store.merchantInfo = { name: tpl.name, address: tpl.address || '', phone: tpl.phone || '' }
   }
 }
+
+function syncMerchantWithBrand() {
+  const matched = compatibleMerchantTemplates.value[0]
+  if (matched) {
+    selectMerchantTemplate(matched.id)
+    return
+  }
+  store.selectedMerchantTemplateId = 'custom'
+  store.merchantInfo = {
+    name: brandName.value ? `${brandName.value}${industryTemplate.value.merchantSuffix}` : '',
+    address: '',
+    phone: '',
+  }
+}
+
+// 挂载时（previous === undefined）若已有商户名，说明是恢复项目/草稿，不得覆盖
+watch(() => store.displayBrandName, (value, previous) => {
+  if (!value || value === previous) return
+  if (previous === undefined && store.merchantInfo.name.trim()) return
+  syncMerchantWithBrand()
+}, { immediate: true })
+watch(() => store.industry, (value, previous) => {
+  if (previous !== undefined && value === previous) return
+  if (previous === undefined && store.merchantInfo.name.trim()) return
+  syncMerchantWithBrand()
+}, { immediate: true })
 
 const isCustomMerchant = computed(() => {
   const id = store.selectedMerchantTemplateId
@@ -111,14 +145,14 @@ async function saveMerchant() {
   }
 }
 
-function confirmDeleteMerchant(id, e) {
-  e.stopPropagation()
-  if (confirm('确定删除此商家地址吗？')) {
-    doDeleteMerchant(id)
-  }
-}
+const pendingDeleteMerchant = ref(null)
 
-async function doDeleteMerchant(id) {
+function askDeleteMerchant(id) { pendingDeleteMerchant.value = id }
+
+async function confirmDeleteMerchant() {
+  const id = pendingDeleteMerchant.value
+  pendingDeleteMerchant.value = null
+  if (id === null) return
   try {
     await store.deleteCustomMerchant(id)
     toast.success('商家地址已删除')
@@ -129,526 +163,256 @@ async function doDeleteMerchant(id) {
 </script>
 
 <template>
-  <div>
-  <Md3Card variant="elevated" class="step-card">
-    <!-- Header -->
-    <div class="step-header">
-      <h2 class="step-title">反面活动配置</h2>
-      <p class="step-subtitle">添加详细活动介绍（最多6个）和商家信息</p>
-    </div>
-
-    <!-- ====== Activity List ====== -->
-    <section class="section">
-      <div class="section-head">
-        <h3 class="section-label">活动列表 <span class="required-dot">*</span></h3>
-        <div style="flex: 1"></div>
-        <span class="md3-badge md3-badge--tonal">{{ activities.length }} / 6</span>
-        <Md3Button
-          variant="tonal"
-          size="small"
+  <EdSection num="03" title="反面活动" desc="添加详细活动介绍（最多6个）和商家信息">
+    <div class="block">
+      <div class="block__head">
+        <h3 class="block__title ed-label">活动列表</h3>
+        <span class="ed-meta">{{ activities.length }} / 6</span>
+        <EdButton
+          variant="text"
+          size="sm"
           :disabled="activities.length >= 6"
           @click="openAddModal"
         >
-          &#43; 添加活动
-        </Md3Button>
+          <EdIcon name="plus" :size="15" />
+          添加活动
+        </EdButton>
       </div>
 
-      <!-- Empty state -->
-      <div v-if="activities.length === 0" class="md3-empty">
-        <span class="md3-empty__icon">&#128196;</span>
-        <span class="md3-empty__title">暂无活动</span>
-        <span class="md3-empty__desc">点击上方按钮添加活动详情</span>
+      <div v-if="activities.length === 0" class="empty">
+        <p class="empty__line">暂无活动</p>
+        <hr class="ed-rule" />
+        <p class="empty__hint ed-meta">点击上方按钮添加活动详情</p>
       </div>
 
-      <!-- Activity cards -->
-      <div v-else class="activity-list">
+      <div v-else>
         <div
           v-for="(act, idx) in activities"
           :key="act.id"
-          class="activity-card"
+          class="act-row"
         >
-          <div class="activity-header">
-            <span class="md3-badge md3-badge--filled">{{ act.discountType || '未分类' }}</span>
-            <span class="activity-index">活动 {{ idx + 1 }}</span>
-            <div style="flex: 1"></div>
-            <Md3Button variant="text" size="small" @click="openEditModal(act)">
-              &#9998; 编辑
-            </Md3Button>
-            <Md3Button variant="text" size="small" @click="confirmRemoveActivity(act)">
-              &#128465; 删除
-            </Md3Button>
-          </div>
-          <div class="activity-body">
-            <div class="activity-row">
-              <span class="activity-label">类型</span>
-              <span class="activity-value">{{ activityTypeLabel(act.type) }}</span>
-            </div>
-            <div class="activity-row">
-              <span class="activity-label">内容</span>
-              <span class="activity-value">{{ act.content }}</span>
-            </div>
-            <div v-if="act.discountDetail" class="activity-row">
-              <span class="activity-label">优惠详情</span>
-              <span class="activity-value activity-highlight">{{ act.discountDetail }}</span>
-            </div>
-            <div v-if="act.imageUrls?.length" class="activity-images">
-              <img v-for="(url, i) in act.imageUrls" :key="i" :src="url" class="activity-img" alt="" />
-            </div>
-          </div>
+          <span class="act-row__index ed-meta">{{ String(idx + 1).padStart(2, '0') }}</span>
+          <span class="act-row__name">{{ act.discountType || '未分类' }}</span>
+          <span class="spacer" />
+          <button type="button" class="icon-btn" title="编辑" @click="openEditModal(act)">
+            <EdIcon name="edit" :size="15" />
+          </button>
+          <button type="button" class="icon-btn icon-btn--danger" title="删除" @click="askDeleteAct(act)">
+            <EdIcon name="trash" :size="15" />
+          </button>
         </div>
       </div>
-    </section>
+    </div>
 
-    <!-- ====== Merchant Info ====== -->
-    <section class="section">
-      <div class="section-head">
-        <h3 class="section-label">商家信息 <span class="required-dot">*</span></h3>
+    <div class="block">
+      <div class="block__head">
+        <h3 class="block__title ed-label">商家信息</h3>
+        <span class="ed-badge ed-badge--req">必选</span>
       </div>
 
-      <div class="merchant-grid">
-        <!-- Template cards -->
-        <div
-          v-for="tpl in merchantTemplates"
+      <div class="brands">
+        <button
+          v-for="tpl in compatibleMerchantTemplates"
           :key="tpl.id"
-          :class="['merchant-card', { 'merchant-card--selected': selectedMerchantTemplateId === tpl.id }]"
+          type="button"
+          :class="['brand', { 'is-selected': selectedMerchantTemplateId === tpl.id }]"
           @click="selectMerchantTemplate(tpl.id)"
         >
-          <div class="merchant-card-body">
-            <div class="merchant-card-info">
-              <span class="merchant-name">{{ tpl.name }}</span>
-              <span v-if="tpl.address" class="merchant-detail">{{ tpl.address }}<template v-if="tpl.phone"> | {{ tpl.phone }}</template></span>
-            </div>
-            <button
-              v-if="!tpl.isDefault"
-              class="merchant-delete-btn"
-              @click="confirmDeleteMerchant(tpl.id, $event)"
-              title="删除"
-            >
-              &#128465;
-            </button>
-          </div>
-        </div>
+          <span class="brand__name">{{ tpl.name }}</span>
+          <span v-if="tpl.address" class="brand__desc ed-meta">
+            {{ tpl.address }}<template v-if="tpl.phone"> | {{ tpl.phone }}</template>
+          </span>
+          <span
+            v-if="!tpl.isDefault"
+            role="button"
+            tabindex="0"
+            class="merchant-del"
+            title="删除"
+            @click.stop="askDeleteMerchant(tpl.id)"
+            @keydown.enter.stop.prevent="askDeleteMerchant(tpl.id)"
+          >
+            <EdIcon name="trash" :size="13" />
+          </span>
+          <EdIcon v-if="selectedMerchantTemplateId === tpl.id" name="check" :size="14" class="brand__tick" />
+        </button>
 
-        <!-- Custom option -->
-        <div
-          :class="['merchant-card', { 'merchant-card--selected': selectedMerchantTemplateId === 'custom' }]"
+        <button
+          type="button"
+          :class="['brand', { 'is-selected': selectedMerchantTemplateId === 'custom' }]"
           @click="selectMerchantTemplate('custom')"
         >
-          <div class="merchant-card-body">
-            <div class="merchant-card-info">
-              <span class="merchant-name">自定义</span>
-              <span class="merchant-detail">手动填写商家信息</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Add new button -->
-        <div
-          v-if="!showMerchantForm"
-          class="merchant-card merchant-card--add"
-          @click="openMerchantForm"
-        >
-          <span class="merchant-add-icon">&#43;</span>
-          <span class="merchant-add-text">新增商家地址</span>
-        </div>
+          <span class="brand__name">自定义</span>
+          <span class="brand__desc ed-meta">手动填写商家信息</span>
+          <EdIcon v-if="selectedMerchantTemplateId === 'custom'" name="check" :size="14" class="brand__tick" />
+        </button>
       </div>
 
-      <!-- Inline merchant form -->
-      <div v-if="showMerchantForm" class="merchant-form-card">
-        <h4 class="merchant-form-title">新增商家地址</h4>
-        <div class="merchant-form-fields">
-          <Md3TextField
-            v-model="merchantForm.name"
-            placeholder="商家名称，如：周大福珠宝旗舰店"
-            variant="outlined"
-          />
-          <Md3TextField
-            v-model="merchantForm.address"
-            placeholder="店铺地址，如：周大福(五一广场店)"
-            variant="outlined"
-          />
-          <Md3TextField
-            v-model="merchantForm.phone"
-            placeholder="联系电话"
-            variant="outlined"
-          />
+      <p v-if="brandName && !compatibleMerchantTemplates.length" class="merchant-hint ed-meta">
+        {{ store.industry === 'jewelry' ? '当前品牌暂无预设门店，已切换为同品牌自定义信息。' : `请填写${industryTemplate.name}门店信息。` }}
+      </p>
+
+      <EdButton v-if="!showMerchantForm" variant="text" size="sm" @click="openMerchantForm">
+        <EdIcon name="plus" :size="15" />
+        新增商家地址
+      </EdButton>
+
+      <div v-if="showMerchantForm" class="block m-form">
+        <div class="block__head">
+          <h4 class="block__title ed-label">新增商家地址</h4>
         </div>
-        <div class="merchant-form-actions">
-          <Md3Button variant="outlined" size="small" @click="closeMerchantForm">
-            取消
-          </Md3Button>
-          <Md3Button
-            variant="filled"
-            size="small"
+        <div class="fields">
+          <EdField v-model="merchantForm.name" label="商家名称" :placeholder="`如：${brandName || '品牌'}${industryTemplate.merchantSuffix}`" />
+          <EdField v-model="merchantForm.address" label="店铺地址" :placeholder="`如：${brandName || '品牌'}（中心广场店）`" />
+          <EdField v-model="merchantForm.phone" label="联系电话" placeholder="输入联系电话" />
+        </div>
+        <div class="actions">
+          <EdButton variant="text" size="sm" @click="closeMerchantForm">取消</EdButton>
+          <EdButton
+            variant="solid"
+            size="sm"
             :disabled="!merchantForm.name.trim()"
             :loading="merchantSaving"
             @click="saveMerchant"
-          >
-            保存
-          </Md3Button>
+          >保存</EdButton>
         </div>
       </div>
 
-      <!-- Custom merchant edit (when "custom" selected) -->
-      <div v-if="isCustomMerchant && selectedMerchantTemplateId === 'custom' && !showMerchantForm" class="merchant-form-card">
-        <h4 class="merchant-form-title">自定义商家信息</h4>
-        <div class="merchant-form-fields">
-          <Md3TextField
-            :model-value="merchantInfo.name"
-            @update:model-value="merchantInfo.name = $event"
-            placeholder="商家名称，如：周大福珠宝旗舰店"
-            variant="outlined"
-          />
-          <Md3TextField
-            :model-value="merchantInfo.address"
-            @update:model-value="merchantInfo.address = $event"
-            placeholder="店铺地址，如：周大福(五一广场店)"
-            variant="outlined"
-          />
-          <Md3TextField
-            :model-value="merchantInfo.phone"
-            @update:model-value="merchantInfo.phone = $event"
-            placeholder="联系电话"
-            variant="outlined"
-          />
+      <div v-if="isCustomMerchant && selectedMerchantTemplateId === 'custom' && !showMerchantForm" class="block m-form">
+        <div class="block__head">
+          <h4 class="block__title ed-label">自定义商家信息</h4>
+        </div>
+        <div class="fields">
+          <EdField :model-value="merchantInfo.name" label="商家名称" @update:model-value="merchantInfo.name = $event" :placeholder="`如：${brandName || '品牌'}${industryTemplate.merchantSuffix}`" />
+          <EdField :model-value="merchantInfo.address" label="店铺地址" @update:model-value="merchantInfo.address = $event" :placeholder="`如：${brandName || '品牌'}（中心广场店）`" />
+          <EdField :model-value="merchantInfo.phone" label="联系电话" @update:model-value="merchantInfo.phone = $event" placeholder="输入联系电话" />
         </div>
       </div>
-    </section>
-
-    <!-- Action bar -->
-    <div class="md3-card__divider"></div>
-    <div class="action-bar">
-      <Md3Button variant="outlined" @click="store.setStep(2)">
-        &#8592; 上一步
-      </Md3Button>
-      <div class="action-right">
-        <span v-if="!canStep3Next" class="validation-hint">
-          <span class="hint-icon">!</span>
-          <span v-if="!activities.length && !merchantInfo.name.trim()">请添加活动并填写商家信息</span>
-          <span v-else-if="!activities.length">请添加至少一个活动</span>
-          <span v-else>请填写商家名称</span>
-        </span>
-        <Md3Button
-          variant="filled"
-          :disabled="!canStep3Next || generating"
-          :loading="generating"
-          @click="store.generatePosters()"
-        >
-          <template v-if="!generating">&#10024; 生成海报</template>
-          <template v-else>生成中...</template>
-        </Md3Button>
-      </div>
     </div>
 
-    <!-- Error alert -->
-    <div v-if="generateError" class="md3-alert md3-alert--error" style="margin-top: 16px">
-      <span class="md3-alert__icon">&#9888;</span>
-      <span class="md3-alert__body">生成失败：{{ generateError }}</span>
+    <hr class="ed-rule" />
+    <div class="actions">
+      <EdButton variant="text" @click="store.setStep(2)">
+        <EdIcon name="arrow-left" :size="15" />
+        上一步
+      </EdButton>
+      <span v-if="!canStep3Next" class="actions__hint ed-meta">
+        <span v-if="!activities.length && !merchantInfo.name.trim()">请添加活动并填写商家信息</span>
+        <span v-else-if="!activities.length">请添加至少一个活动</span>
+        <span v-else>请填写商家名称</span>
+      </span>
+      <EdButton
+        variant="solid"
+        :disabled="!canStep3Next || generating"
+        :loading="generating"
+        @click="store.generatePosters()"
+      >
+        <EdIcon v-if="!generating" name="sparkle" :size="15" />
+        <template v-if="!generating">生成海报</template>
+        <template v-else>生成中...</template>
+      </EdButton>
     </div>
-  </Md3Card>
 
-  <!-- Activity Modal -->
-  <ActivityModal
-    :show="showModal"
-    :discount-types="discountTypes"
-    :activity="editingActivity"
-    @update:show="showModal = $event"
-    @save="handleSaveActivity"
-  />
+    <div v-if="generateError" class="note">
+      <EdIcon name="warning" :size="13" class="note__icon" />
+      <span>生成失败：{{ generateError }}</span>
+    </div>
 
-  <!-- Generate Progress Dialog -->
-  <GenerateProgressDialog
-    :show="generating"
-    @cancel="store.cancelGenerate()"
-  />
-  </div>
+    <EdDialog
+      v-if="pendingDeleteAct !== null"
+      title="删除这个活动？"
+      :width="420"
+      @close="pendingDeleteAct = null"
+    >
+      <p class="confirm-text">删除后无法恢复，需要重新填写。</p>
+      <template #footer>
+        <EdButton variant="text" @click="pendingDeleteAct = null">取消</EdButton>
+        <EdButton variant="solid" @click="confirmDeleteAct">删除</EdButton>
+      </template>
+    </EdDialog>
+
+    <EdDialog
+      v-if="pendingDeleteMerchant !== null"
+      title="删除这个商家地址？"
+      :width="420"
+      @close="pendingDeleteMerchant = null"
+    >
+      <p class="confirm-text">删除后无法恢复。</p>
+      <template #footer>
+        <EdButton variant="text" @click="pendingDeleteMerchant = null">取消</EdButton>
+        <EdButton variant="solid" @click="confirmDeleteMerchant">删除</EdButton>
+      </template>
+    </EdDialog>
+    <ActivityModal
+      :show="showModal"
+      :discount-types="discountTypes"
+      :activity="editingActivity"
+      :industry="store.industry"
+      @update:show="showModal = $event"
+      @save="handleSaveActivity"
+    />
+
+    <GenerateProgressDialog
+      :show="generating"
+      @cancel="store.cancelGenerate()"
+    />
+  </EdSection>
 </template>
 
 <style scoped>
-.step-card {
-  animation: md3-slide-up var(--md-duration-medium2) var(--md-easing-emphasized-decel);
-}
-
-.step-header {
-  margin-bottom: 32px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.step-title {
-  font-size: var(--md-headline-small);
-  font-weight: 500;
-  color: var(--md-on-surface);
-  letter-spacing: 0;
-  margin-bottom: 6px;
-}
-
-.step-subtitle {
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface-variant);
-  line-height: 1.5;
-}
-
-/* Section layout */
-.section {
-  margin-bottom: 32px;
-}
-
-.section-head {
+.act-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: var(--ed-space-3);
+  padding: var(--ed-space-3) 0;
+  border-bottom: 1px solid var(--ed-rule);
 }
-
-.section-label {
-  font-size: var(--md-title-small);
-  font-weight: 600;
-  color: var(--md-on-surface);
-  margin: 0;
-}
-
-.required-dot {
-  color: var(--md-error);
-}
-
-/* Activity list */
-.activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.activity-card {
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-medium);
-  padding: 16px;
-  background: var(--md-surface);
-  transition: box-shadow var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.activity-card:hover {
-  box-shadow: var(--md-elevation-1);
-}
-
-.activity-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.activity-index {
-  font-size: var(--md-label-large);
-  font-weight: 600;
-  color: var(--md-on-surface);
-}
-
-.activity-body {
-  font-size: var(--md-body-medium);
-}
-
-.activity-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 6px;
-  line-height: 1.5;
-}
-
-.activity-label {
-  color: var(--md-on-surface-variant);
-  flex-shrink: 0;
-  min-width: 70px;
-  font-size: var(--md-body-small);
-}
-
-.activity-value {
-  color: var(--md-on-surface);
-}
-
-.activity-highlight {
-  color: var(--md-primary);
-  font-weight: 600;
-}
-
-.activity-images {
-  display: flex;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.activity-img {
-  width: 52px;
-  height: 52px;
-  border-radius: var(--md-shape-small);
-  object-fit: cover;
-  border: 1px solid var(--md-outline-variant);
-}
-
-/* Merchant grid */
-.merchant-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.merchant-card {
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-medium);
-  padding: 16px;
-  background: var(--md-surface);
-  cursor: pointer;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.merchant-card:hover {
-  box-shadow: var(--md-elevation-1);
-  border-color: var(--md-outline);
-}
-
-.merchant-card--selected {
-  border-color: var(--md-primary);
-  border-width: 2px;
-  padding: 15px;
-  background: color-mix(in srgb, var(--md-primary-container) 25%, var(--md-surface));
-}
-
-.merchant-card-body {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.merchant-card-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.merchant-name {
-  display: block;
-  font-size: var(--md-body-large);
-  font-weight: 600;
-  color: var(--md-on-surface);
-}
-
-.merchant-detail {
-  display: block;
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-  margin-top: 2px;
-}
-
-.merchant-delete-btn {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--md-shape-full);
-  border: none;
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  cursor: pointer;
+.act-row__index { text-transform: none; letter-spacing: .04em; }
+.act-row__name {
+  font-family: var(--ed-serif);
   font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  color: var(--ed-ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.spacer { flex: 1; }
 
-.merchant-delete-btn:hover {
-  background: color-mix(in srgb, var(--md-error) 10%, transparent);
-  color: var(--md-error);
-}
-
-/* Add merchant card */
-.merchant-card--add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 20px;
-  border-style: dashed;
-  border-color: var(--md-outline);
-  color: var(--md-on-surface-variant);
-}
-
-.merchant-card--add:hover {
-  border-color: var(--md-primary);
-  color: var(--md-primary);
-  background: color-mix(in srgb, var(--md-primary) 5%, transparent);
-}
-
-.merchant-add-icon {
-  font-size: 20px;
-  font-weight: 500;
-}
-
-.merchant-add-text {
-  font-size: var(--md-label-large);
-  font-weight: 500;
-}
-
-/* Merchant form */
-.merchant-form-card {
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-medium);
-  padding: 20px;
-  background: var(--md-surface-container-low);
-  margin-top: 12px;
-  animation: md3-slide-up var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.merchant-form-title {
-  font-size: var(--md-title-small);
-  font-weight: 600;
-  color: var(--md-on-surface);
-  margin: 0 0 16px 0;
-}
-
-.merchant-form-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.merchant-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-/* Action bar */
-.action-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.action-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.validation-hint {
+.icon-btn {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface-variant);
+  padding: var(--ed-space-1);
+  border: 0;
+  background: transparent;
+  color: var(--ed-ink-faint);
+  cursor: pointer;
+}
+.icon-btn:hover { color: var(--ed-ink); }
+.icon-btn--danger:hover { color: var(--ed-danger); }
+
+.empty { padding: var(--ed-space-5) 0; }
+.empty__line {
+  font-family: var(--ed-serif);
+  font-size: var(--ed-subhead);
+  color: var(--ed-ink);
+  margin-bottom: var(--ed-space-3);
+}
+.empty__hint { text-transform: none; letter-spacing: .02em; margin-top: var(--ed-space-3); }
+
+.m-form { margin-top: var(--ed-space-5); }
+
+.merchant-del {
+  position: absolute;
+  top: var(--ed-space-3);
+  right: 26px;
+  display: inline-flex;
+  color: var(--ed-ink-faint);
+  cursor: pointer;
+}
+.merchant-del:hover { color: var(--ed-danger); }
+.merchant-hint {
+  margin: var(--ed-space-2) 0 var(--ed-space-3);
+  text-transform: none;
 }
 
-.hint-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--md-shape-full);
-  background: var(--md-error-container);
-  color: var(--md-on-error-container);
-  font-size: var(--md-label-small);
-  font-weight: 700;
-}
+.confirm-text { color: var(--ed-ink-soft); font-size: 14px; }
 </style>

@@ -1,7 +1,36 @@
 node_modules/
 dist/
-data/
+/frontend/dist/
+.vite/
+.playwright-mcp/
+.superpowers/
 .env
+.env.*
+!.env.example
 *.log
-__pycache__/
 *.pyc
+__pycache__/
+
+# 本地运行日志目录
+/backend/logs/
+
+# 运行时数据：上传文件、LOGO、以及含 API Key 的 settings.json。
+# 注意前导斜杠：不加的话会连 frontend/src/data/（presetActivities.js 源码）一起忽略掉。
+/data/
+/backend/data/
+
+# 本地备份、导出和大体积打包文件
+/backup/
+/haoibao-site.tar.gz
+/haoibao.sql
+/home-current.png
+
+# 本地第三方设计资源仓库（整目录不入库，仅脚本引用）
+/third-party/
+
+# Local shared-hosting overrides.
+/.htaccess
+/.user.ini
+
+# Temporary domain validation tokens are issued by the hosting provider.
+/.well-known/acme-challenge/*

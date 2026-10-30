@@ -1,95 +1,45 @@
 const express = require('express');
 const router = express.Router();
-const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const doubao = require('../services/doubao');
 const { buildFrontPrompt, buildFrontBgPrompt } = require('../prompts/front');
-const { buildBackBgPrompt, buildCarStickerBgPrompt, buildBackPrompt } = require('../prompts/back');
+const { buildBackBgPrompt, buildBackPosterPrompt, buildCarStickerBgPrompt } = require('../prompts/back');
 const { renderBackPoster, renderCarSticker, computeLayout, buildLeaferJson, buildFrontLeaferJson, buildCarStickerJson } = require('../services/posterRenderer');
 const { getEnhancePrompt, getBackgroundEnhancePrompt, getEnhanceStrength } = require('../prompts/enhance');
+const { UPLOAD_DIR, findLocalFile, fetchRemoteBuffer } = require('../services/imageStore');
 
-const UPLOAD_DIR = path.join(__dirname, '../../../data/uploads');
-const LOGO_DIR = path.join(__dirname, '../../../data/logos');
-const USE_SVG_RENDER = true; // false = 旧方案（AI生成完整海报）
-
-function safeBasename(str) {
-  return path.basename(String(str)).replace(/[^a-zA-Z0-9_-]/g, '');
-}
-
-/**
- * 生成金色相框图片卡片
- */
-async function createFramedImage(imagePath, cardW, cardH) {
-  const bw = Math.max(3, Math.round(cardW * 0.015));
-  const iw = cardW - bw * 2;
-  const ih = cardH - bw * 2;
-  const product = await sharp(imagePath).resize(iw, ih, { fit: 'cover' }).png().toBuffer();
-  const card = await sharp({
-    create: { width: cardW, height: cardH, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } }
-  }).png().toBuffer();
-  const withPhoto = await sharp(card).composite([{ input: product, top: bw, left: bw }]).png().toBuffer();
-  const frame = await sharp({
-    create: { width: cardW + bw * 2, height: cardH + bw * 2, channels: 4, background: { r: 255, g: 215, b: 0, alpha: 1 } }
-  }).png().toBuffer();
-  return await sharp(frame).composite([{ input: withPhoto, top: bw, left: bw }]).png().toBuffer();
-}
-
-/**
- * 旧方案：AI生成完整海报后再合成商品图（兜底）
- */
-async function compositeProductImagesLegacy(imageBuffer, activities) {
-  if (!activities || activities.length === 0) return imageBuffer;
-  const metadata = await sharp(imageBuffer).metadata();
-  const iw = metadata.width || 2100;
-  const ih = metadata.height || 2970;
-  const activityAreaHeight = Math.floor(ih * 0.72);
-  const numActivities = activities.length;
-  const moduleHeight = Math.floor(activityAreaHeight / numActivities);
-  const overlays = [];
-
-  for (let i = 0; i < activities.length; i++) {
-    const act = activities[i];
-    if (!act.imageUrls || act.imageUrls.length === 0) continue;
-    const yCenter = Math.floor(moduleHeight * (i + 0.5));
-    const cardW = act.type === 'multi_image' ? 140 : 200;
-    const cardH = act.type === 'multi_image' ? 140 : 200;
-    const topStart = yCenter - Math.floor(cardH / 2);
-    const xStart = iw - 380;
-
-    for (let j = 0; j < act.imageUrls.length; j++) {
-      const imageUrl = act.imageUrls[j];
-      let imgBuffer;
-
-      try {
-        if (imageUrl.startsWith('data:')) {
-          // Base64 data URL
-          const base64Data = imageUrl.split(',')[1];
-          imgBuffer = Buffer.from(base64Data, 'base64');
-        } else {
-          // 文件 URL
-          const localPath = path.join(UPLOAD_DIR, path.basename(imageUrl));
-          if (fs.existsSync(localPath)) {
-            imgBuffer = fs.readFileSync(localPath);
-          }
-        }
-
-        if (imgBuffer) {
-          const framed = await createFramedImage(imgBuffer, cardW, cardH);
-          overlays.push({
-            input: framed,
-            top: Math.min(topStart + j * (cardH + 12), ih - cardH),
-            left: xStart,
-          });
-        }
-      } catch (err) {
-        console.error(`[合成图片失败] ${imageUrl.substring(0, 50)}...:`, err.message);
-      }
-    }
+async function readImageBuffer(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== 'string') throw new Error('图片地址为空');
+  if (imageUrl.startsWith('data:')) {
+    return Buffer.from(imageUrl.slice(imageUrl.indexOf(',') + 1), 'base64');
   }
-  if (overlays.length === 0) return imageBuffer;
-  return await sharp(imageBuffer).composite(overlays).png().toBuffer();
+  if (imageUrl.startsWith('/uploads/')) {
+    const localPath = findLocalFile(imageUrl);
+    if (!localPath) throw new Error('海报图片不存在');
+    return fs.readFileSync(localPath);
+  }
+  if (/^https?:\/\//i.test(imageUrl)) {
+    return fetchRemoteBuffer(imageUrl);
+  }
+  throw new Error('不支持的图片地址');
+}
+
+async function persistGeneratedImage(imageUrl, prefix) {
+  const buffer = await readImageBuffer(imageUrl);
+  if (!buffer.length) throw new Error('AI 返回了空图片');
+  const filename = `${prefix}_${uuidv4()}.png`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, filename), buffer);
+  return `/uploads/${filename}`;
+}
+
+// 下载 AI 图床返回的远程图，统一走 SSRF 白名单
+async function downloadProviderImage(imageUrl) {
+  if (typeof imageUrl === 'string' && imageUrl.startsWith('data:')) {
+    return Buffer.from(imageUrl.slice(imageUrl.indexOf(',') + 1), 'base64');
+  }
+  return fetchRemoteBuffer(imageUrl);
 }
 
 /**
@@ -113,39 +63,17 @@ router.post('/front', async (req, res) => {
     }
 
     const size = data.size ? `${data.size.width}x${data.size.height}` : '2100x2970';
-    const pW = data.size?.width || 2100;
     const prompt = buildFrontPrompt(data);
     const result = await doubao.generateImage({ prompt, size, n: 1 });
-    let imageUrl = result?.data?.[0]?.url || null;
-
-    // 下载 AI 生成的图片并合成品牌 LOGO
-    if (imageUrl && data.brandId) {
-      try {
-        const resp = await fetch(imageUrl);
-        const imgBuffer = Buffer.from(await resp.arrayBuffer());
-        const logoPath = path.join(LOGO_DIR, `${safeBasename(data.brandId)}.png`);
-        if (fs.existsSync(logoPath)) {
-          const logoW = Math.round(pW * 0.25);
-          const logoMeta = await sharp(logoPath).metadata();
-          const logoH = Math.round((logoMeta.height / logoMeta.width) * logoW);
-          const logoBuffer = await sharp(logoPath).resize(logoW, logoH, { fit: 'inside' }).png().toBuffer();
-          const top = Math.round(pW * 0.03);
-          const left = Math.round((pW - logoW) / 2);
-          const composited = await sharp(imgBuffer).composite([{ input: logoBuffer, top, left }]).png().toBuffer();
-          const filename = `poster_front_${uuidv4()}.png`;
-          fs.writeFileSync(path.join(UPLOAD_DIR, filename), composited);
-          imageUrl = `/uploads/${filename}`;
-        }
-      } catch (e) {
-        console.error('[正面海报LOGO合成失败]', e.message);
-      }
-    }
+    const generatedUrl = result?.data?.[0]?.url || null;
+    if (!generatedUrl) throw new Error('AI生成正面海报失败');
+    const imageUrl = await persistGeneratedImage(generatedUrl, 'poster_front');
 
     res.json({
       success: true,
       imageUrl,
       prompt,
-      rawResult: result,
+      renderMode: 'single-image',
     });
   } catch (err) {
     console.error('[正面海报生成错误]', err.message);
@@ -185,32 +113,12 @@ router.post('/front-json', async (req, res) => {
 
     if (!bgUrl) throw new Error('AI生成背景失败');
 
-    const resp = await fetch(bgUrl);
-    const bgBuffer = Buffer.from(await resp.arrayBuffer());
+    const bgBuffer = await downloadProviderImage(bgUrl);
 
-    // 2. 合成品牌 LOGO
-    let finalBgBuffer = bgBuffer;
-    if (data.brandId) {
-      try {
-        const logoPath = path.join(LOGO_DIR, `${safeBasename(data.brandId)}.png`);
-        if (fs.existsSync(logoPath)) {
-          const logoW = Math.round(pW * 0.25);
-          const logoMeta = await sharp(logoPath).metadata();
-          const logoH = Math.round((logoMeta.height / logoMeta.width) * logoW);
-          const logoBuffer = await sharp(logoPath).resize(logoW, logoH, { fit: 'inside' }).png().toBuffer();
-          const top = Math.round(pW * 0.03);
-          const left = Math.round((pW - logoW) / 2);
-          finalBgBuffer = await sharp(bgBuffer).composite([{ input: logoBuffer, top, left }]).png().toBuffer();
-        }
-      } catch (e) {
-        console.error('[正面海报LOGO合成失败]', e.message);
-      }
-    }
-
-    // 3. 保存背景图
+    // 2. 保存背景图
     const uid = uuidv4();
     const bgFilename = `bg_front_${uid}.png`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, bgFilename), finalBgBuffer);
+    fs.writeFileSync(path.join(UPLOAD_DIR, bgFilename), bgBuffer);
     const bgImageUrl = `/uploads/${bgFilename}`;
 
     // 4. 生成 Leafer JSON
@@ -223,7 +131,7 @@ router.post('/front-json', async (req, res) => {
 
     // 5. 同时生成扁平图片作为 fallback
     const filename = `poster_front_${uid}.png`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, filename), finalBgBuffer);
+    fs.writeFileSync(path.join(UPLOAD_DIR, filename), bgBuffer);
 
     res.json({
       success: true,
@@ -268,66 +176,19 @@ router.post('/back', async (req, res) => {
     const pH = data.size?.height || 2970;
     const sizeStr = `${pW}x${pH}`;
 
-    if (USE_SVG_RENDER) {
-      // ====== 新方案：AI画背景 + SVG渲染文字布局 ======
-      console.log('[poster/back] data.bgColor:', data.bgColor, 'data.primaryColor:', data.primaryColor);
-      console.log('[poster/back] activities:', data.activities.map(a => ({ bg: a.bgColor, highlight: a.highlight, content: (a.discountDetail || a.content || '').slice(0, 30) })));
-      const bgPrompt = buildBackBgPrompt(data);
-      const result = await doubao.generateImage({ prompt: bgPrompt, size: sizeStr, n: 1 });
-      const bgUrl = result?.data?.[0]?.url;
-
-      if (!bgUrl) throw new Error('AI生成背景失败');
-
-      const resp = await fetch(bgUrl);
-      const bgBuffer = Buffer.from(await resp.arrayBuffer());
-
-      const composited = await renderBackPoster(bgBuffer, data.activities, data.merchantInfo, data.brand, {
-        width: pW,
-        height: pH,
-        primaryColor: data.primaryColor || '#FFD700',
-        secondaryColor: data.secondaryColor || '#FF6B35',
-        bgColor: data.bgColor || '#1a1a3a',
-      });
-
-      const uid = uuidv4();
-      const filename = `poster_back_${uid}.png`;
-      const bgFilename = `bg_${uid}.png`;
-      fs.writeFileSync(path.join(UPLOAD_DIR, filename), composited);
-      fs.writeFileSync(path.join(UPLOAD_DIR, bgFilename), bgBuffer);
-
-      return res.json({
-        success: true,
-        imageUrl: `/uploads/${filename}`,
-        bgImageUrl: `/uploads/${bgFilename}`,
-        prompt: bgPrompt,
-        renderMode: 'svg',
-      });
-    }
-
-    // ====== 旧方案兜底 ======
-    const prompt = buildBackPrompt(data);
+    // AI 直接生成完整反面成图（背景+文字分层方案会互相覆盖，已弃用）
+    const prompt = buildBackPosterPrompt(data);
     const result = await doubao.generateImage({ prompt, size: sizeStr, n: 1 });
-    let imageUrl = result?.data?.[0]?.url || null;
+    const imageUrl = result?.data?.[0]?.url || null;
+    if (!imageUrl) throw new Error('AI生成反面海报失败');
 
-    if (imageUrl && data.activities?.some(a => a.imageUrls?.length > 0)) {
-      try {
-        const resp = await fetch(imageUrl);
-        const buffer = Buffer.from(await resp.arrayBuffer());
-        const composited = await compositeProductImagesLegacy(buffer, data.activities);
-        const filename = `poster_back_${uuidv4()}.png`;
-        fs.writeFileSync(path.join(UPLOAD_DIR, filename), composited);
-        imageUrl = `/uploads/${filename}`;
-      } catch (e) {
-        console.error('[旧方案合成错误]', e.message);
-      }
-    }
+    const savedUrl = await persistGeneratedImage(imageUrl, 'poster_back');
 
     res.json({
       success: true,
-      imageUrl,
+      imageUrl: savedUrl,
       prompt,
-      rawResult: result,
-      renderMode: 'legacy',
+      renderMode: 'single-image',
     });
   } catch (err) {
     console.error('[反面海报生成错误]', err.message);
@@ -355,8 +216,7 @@ router.post('/car-sticker', async (req, res) => {
 
     if (!bgUrl) throw new Error('AI生成背景失败');
 
-    const resp = await fetch(bgUrl);
-    const bgBuffer = Buffer.from(await resp.arrayBuffer());
+    const bgBuffer = await downloadProviderImage(bgUrl);
 
     const composited = await renderCarSticker(bgBuffer, data, { width: pW, height: pH });
 
@@ -410,8 +270,7 @@ router.post('/back-json', async (req, res) => {
 
     if (!bgUrl) throw new Error('AI生成背景失败');
 
-    const resp = await fetch(bgUrl);
-    const bgBuffer = Buffer.from(await resp.arrayBuffer());
+    const bgBuffer = await downloadProviderImage(bgUrl);
 
     // 2. 保存背景图
     const bgUid = uuidv4();
@@ -478,8 +337,7 @@ router.post('/car-sticker-json', async (req, res) => {
 
     if (!bgUrl) throw new Error('AI生成背景失败');
 
-    const resp = await fetch(bgUrl);
-    const bgBuffer = Buffer.from(await resp.arrayBuffer());
+    const bgBuffer = await downloadProviderImage(bgUrl);
 
     // 2. 保存背景图
     const uid = uuidv4();
@@ -533,18 +391,28 @@ router.post('/enhance', async (req, res) => {
     } = req.body;
 
     if (!imageUrl) {
-      return res.status(400).json({ error: '缺少海报图片地址' });
+      return res.status(400).json({ error: '海报源图不存在，请先生成海报后再优化' });
+    }
+
+    let sourceBuffer;
+    try {
+      sourceBuffer = await readImageBuffer(imageUrl);
+      if (!sourceBuffer.length) throw new Error('empty image');
+    } catch (e) {
+      console.error('[poster/enhance] 源图读取失败:', imageUrl, e.message);
+      return res.status(404).json({ error: '海报源图已不存在，请重新生成海报后再优化' });
     }
 
     if (posterType === 'back' && bgImageUrl) {
       // ====== 反面海报：只优化背景，重新合成文字（安全，文字不受影响） ======
       console.log('[poster/enhance] 反面海报背景优化, type:', type);
-      const bgPath = path.join(UPLOAD_DIR, path.basename(bgImageUrl));
-      if (!fs.existsSync(bgPath)) {
-        return res.status(404).json({ error: '背景图不存在，请重新生成海报' });
+      let bgBuffer;
+      try {
+        bgBuffer = await readImageBuffer(bgImageUrl);
+      } catch (e) {
+        console.error('[poster/enhance] 反面背景读取失败:', bgImageUrl, e.message);
+        return res.status(404).json({ error: '反面背景图已不存在，请重新生成反面海报后再优化' });
       }
-
-      const bgBuffer = fs.readFileSync(bgPath);
       const prompt = getBackgroundEnhancePrompt(bgColor, primaryColor);
       const strength = getEnhanceStrength('background', 'back');
 
@@ -552,8 +420,8 @@ router.post('/enhance', async (req, res) => {
       const enhancedBgUrl = result?.data?.[0]?.url;
       if (!enhancedBgUrl) throw new Error('AI优化背景失败');
 
-      const resp = await fetch(enhancedBgUrl);
-      const enhancedBgBuffer = Buffer.from(await resp.arrayBuffer());
+      const enhancedBgBuffer = await downloadProviderImage(enhancedBgUrl);
+      if (!enhancedBgBuffer.length) throw new Error('优化后的背景为空，请稍后重试');
 
       const composited = await renderBackPoster(enhancedBgBuffer, activities || [], merchantInfo, brand, {
         width: 2100,
@@ -579,12 +447,7 @@ router.post('/enhance', async (req, res) => {
 
     // ====== 正面海报或其他：整体 img2img ======
     console.log('[poster/enhance] 整体优化, type:', type);
-    const imgPath = path.join(UPLOAD_DIR, path.basename(imageUrl));
-    if (!fs.existsSync(imgPath)) {
-      return res.status(404).json({ error: '海报图片不存在' });
-    }
-
-    const imgBuffer = fs.readFileSync(imgPath);
+    const imgBuffer = sourceBuffer;
     const prompt = getEnhancePrompt(type, { primary: primaryColor, secondary: secondaryColor, bg: bgColor });
     const strength = getEnhanceStrength(type, posterType);
 
@@ -592,8 +455,8 @@ router.post('/enhance', async (req, res) => {
     const enhancedUrl = result?.data?.[0]?.url;
     if (!enhancedUrl) throw new Error('AI优化失败');
 
-    const resp = await fetch(enhancedUrl);
-    const enhancedBuffer = Buffer.from(await resp.arrayBuffer());
+    const enhancedBuffer = await downloadProviderImage(enhancedUrl);
+    if (!enhancedBuffer.length) throw new Error('优化结果为空，请稍后重试');
     const filename = `poster_enhanced_${uuidv4()}.png`;
     fs.writeFileSync(path.join(UPLOAD_DIR, filename), enhancedBuffer);
 
@@ -604,7 +467,7 @@ router.post('/enhance', async (req, res) => {
   } catch (err) {
     console.error('[海报优化错误]', err.message);
     res.status(500).json({
-      error: '海报优化失败',
+      error: '海报优化暂时失败，请保留当前内容后重试',
       detail: err.response?.data || err.message,
     });
   }

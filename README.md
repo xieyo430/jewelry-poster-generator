@@ -12,85 +12,88 @@
 | UI 风格 | 自定义 Material Design 3 组件 (Md3Button / Md3Card / Md3Chip / Md3TextField) |
 | HTTP 客户端 | Axios |
 | 后端框架 | Express 4.21 |
-| 数据库 | MySQL 8.0+ (mysql2, 连接池 20) |
+| 数据库 | MySQL 5.7+ / 8.0 (mysql2, 连接池 20) |
 | 图像处理 | Sharp 0.34 (合成、缩放、SVG 转 PNG) |
 | 文件上传 | Multer (磁盘存储, 10MB 限制) |
 
 ### AI 服务
 
-| 用途 | 服务商 | 模型 |
-|------|--------|------|
-| 文生图 (主) | SiliconFlow | Tongyi-MAI/Z-Image-Turbo |
-| 文生图 (备) | 火山引擎 ARK | Seedream 4.5 |
-| 图生图增强 | 火山引擎 ARK | Seedream 5.0 |
-| 文本 LLM | 小米 MiMo | mimo-v2.5-pro (Anthropic API 格式) |
-| 视觉定位 | 火山引擎 | 多模态模型 (产品区域检测) |
-| 背景去除 | rembg | 本地 Python 服务 (可选) |
+以 `backend/src/configFields.js` 中的环境变量为准。图像生成走「火山引擎 ARK 为主、硅基流动为备」的自动降级策略；文本由 DeepSeek 承担。
+
+| 用途 | 服务商 | 模型 / 环境变量 |
+|------|--------|----------------|
+| 文生图 (主) | 火山引擎 ARK | `IMAGE_MODEL_ID`（doubao-seedream 系列推理端点） |
+| 文生图 (备) | 硅基流动 SiliconFlow | `SILICONFLOW_IMAGE_MODEL`，默认 `baidu/ERNIE-Image-Turbo` |
+| 图生图增强 (主) | 火山引擎 ARK | `ENHANCE_MODEL_ID`（Seedream 5.0，reference_image） |
+| 图生图增强 (备) | 硅基流动 SiliconFlow | 同模型走 image + strength |
+| 文本 LLM（智能填充 / AI 帮写 / 文案解析） | DeepSeek | `DEEPSEEK_MODEL_ID`，默认 `deepseek-v4-flash` |
+| 背景去除 (可选) | 本地 rembg | Python 服务 `http://localhost:5000` |
+
+降级逻辑见 `services/doubao.js` 的 `generateImage()` / `editImage()`：ARK 请求失败（含尺寸/限流错误）自动尝试 SiliconFlow，两组 Key 均缺失时报错。
 
 ## 项目结构
 
 ```
 haibao/
-├── start.bat                    # 一键启动脚本 (前端 + 后端)
+├── start.bat                        # 一键启动脚本 (前端 + 后端, Windows)
+├── README.md
 ├── backend/
-│   ├── .env                     # 环境变量配置
-│   ├── .env.example             # 环境变量模板
+│   ├── .env                         # 环境变量（不入库）
+│   ├── .env.example                 # 由 npm run gen:env 自动生成，勿手改
 │   ├── package.json
+│   ├── scripts/
+│   │   └── genEnvExample.js         # 从 configFields.js 生成 .env.example
 │   └── src/
-│       ├── app.js               # Express 入口
-│       ├── routes/              # API 路由
-│       │   ├── poster.js        # 海报生成 (正面/背面/车贴/增强)
-│       │   ├── ai.js            # AI 文本分析
-│       │   ├── brands.js        # 品牌管理
-│       │   ├── festivals.js     # 节日管理
-│       │   ├── discountTypes.js # 优惠类型管理
-│       │   ├── merchantInfo.js  # 商户信息管理
-│       │   ├── data.js          # 项目保存/加载、文件上传
-│       │   ├── logo.js          # AI Logo 生成
-│       │   ├── matting.js       # 抠图服务 (路由未挂载)
-│       │   └── settings.js      # 系统设置
-│       ├── services/            # 业务逻辑层
-│       │   ├── posterRenderer.js # SVG 海报渲染引擎 (~1370 行)
-│       │   ├── doubao.js        # 火山引擎 + SiliconFlow 图像生成
-│       │   ├── mimo.js          # MiMo LLM 服务
-│       │   ├── ernie.js         # 百度文心图像生成
-│       │   ├── visionLocator.js # 视觉定位服务
-│       │   ├── db.js            # MySQL 连接池
-│       │   ├── configService.js # 配置管理 (DB + 文件 + 环境变量)
-│       │   ├── storage.js       # JSON 文件存储
-│       │   └── matting.js       # rembg 客户端
-│       └── prompts/             # AI 提示词模板
-│           ├── front.js         # 正面海报提示词
-│           ├── back.js          # 背面海报提示词
-│           ├── enhance.js       # 增强提示词
-│           └── logo.js          # Logo 提示词
+│       ├── app.js                   # Express 入口（认证/错误处理/定时清理）
+│       ├── configFields.js          # 配置字段单一事实源（设置页 + env 模板）
+│       ├── routes/
+│       │   ├── poster.js            # 海报生成：front/back/car-sticker + json + enhance（7 端点）
+│       │   ├── ai.js                # 文案：analyze-activity/generate-titles/smart-fill/write-copy
+│       │   ├── data.js              # 项目事务保存/加载、上传、清理
+│       │   ├── brands.js            # 品牌管理
+│       │   ├── festivals.js         # 节日管理
+│       │   ├── discountTypes.js     # 优惠类型管理
+│       │   ├── merchantInfo.js      # 商户信息管理
+│       │   ├── logo.js              # AI Logo 生成
+│       │   ├── matting.js           # 抠图服务
+│       │   └── settings.js          # 系统设置（GET 脱敏 / PUT 热更新）
+│       ├── services/
+│       │   ├── posterRenderer.js    # SVG 海报渲染引擎
+│       │   ├── doubao.js            # 火山引擎 ARK + 硅基流动图像生成
+│       │   ├── deepseek.js          # DeepSeek LLM 客户端
+│       │   ├── copyFilter.js        # 广告法极限词过滤（含自测）
+│       │   ├── matting.js           # rembg 客户端
+│       │   └── db.js                # MySQL 连接池
+│       └── prompts/                 # AI 提示词：front / back / enhance / logo
 ├── frontend/
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── package.json
 │   └── src/
 │       ├── main.js
-│       ├── App.vue              # 根组件 (顶栏、全局弹窗)
-│       ├── api/index.js         # Axios 封装
-│       ├── store/poster.js      # Pinia 主状态
-│       ├── data/presetActivities.js  # ~160 个预设活动模板
-│       ├── utils/color.js       # MD3 色彩调色板生成
-│       ├── styles/              # 全局样式 + MD3 设计令牌
+│       ├── App.vue                  # 顶栏、向导骨架、全局弹窗
+│       ├── api/index.js             # Axios 封装
+│       ├── store/poster.js          # Pinia 主状态（localStorage 持久化）
+│       ├── composables/             # useCopyOptions / useToast
+│       ├── data/                    # festivalGroups、预设活动模板
+│       ├── utils/color.js           # 动态调色板
+│       ├── styles/                  # 全局样式 + 设计令牌
 │       └── components/
-│           ├── PosterWizard.vue      # 3 步向导容器
-│           ├── PosterPreview.vue     # 海报预览 + 操作
-│           ├── EnhancePanel.vue      # AI 增强面板
-│           ├── steps/               # 向导步骤组件
-│           └── common/              # 通用 MD3 组件
+│           ├── PosterPreview.vue    # 海报预览 + 操作
+│           ├── EnhancePanel.vue     # AI 增强面板
+│           ├── steps/               # Step1FestivalBrand / Step2Promotions / Step3Activities
+│           └── common/              # Ed 前缀组件（EdButton/EdField/EdDialog/EdMark/
+│                                   #   EdSection/EdIcon/CopyOptionsPanel/MarginNotes/StepTabs 等）
 ├── database/
-│   ├── schema.sql               # 建表语句 (13 张表)
-│   ├── seed.sql                 # 种子数据
-│   └── run_migration.cjs        # 迁移脚本
-└── data/                        # 运行时数据 (gitignore)
-    ├── settings.json            # 用户配置的 API 密钥
-    ├── custom-merchants.json    # 自定义商户数据
-    ├── logos/                   # 品牌 Logo PNG
-    └── uploads/                 # 上传/生成的图片 (12 小时自动清理)
+│   ├── schema.sql                   # 建表语句
+│   ├── seed.sql                     # 种子数据
+│   └── run_migration.cjs            # 迁移脚本
+└── data/                            # 运行时数据（不入库）
+    ├── settings.json                # 设置页写入的配置（优先级高于 .env）
+    ├── custom-merchants.json        # 自定义商户数据
+    ├── logos/                       # 品牌 Logo PNG
+    ├── uploads/                     # 上传/生成图片（每小时异步清理 24 小时前文件）
+    └── matted/                      # 抠图输出
 ```
 
 ## 快速启动
@@ -98,7 +101,7 @@ haibao/
 ### 前置要求
 
 - **Node.js** >= 18
-- **MySQL** >= 8.0
+- **MySQL** >= 5.7（8.0 亦可）
 - **npm** 或 **pnpm**
 
 ### 1. 安装依赖
@@ -115,44 +118,37 @@ npm install
 
 ### 2. 配置环境变量
 
-复制 `backend/.env.example` 为 `backend/.env`，填入以下配置：
+复制 `backend/.env.example` 为 `backend/.env` 并按需填写。`.env.example` 由 `npm run gen:env` 从 `src/configFields.js` 自动生成，字段表如下（以该文件为单一事实源）：
 
-```env
-# MySQL 数据库
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=zbt
+| 分组 | 变量 | 必填 | 默认值 / 说明 |
+|------|------|------|--------------|
+| 数据库 | `DB_HOST` | 是 | `127.0.0.1` |
+| 数据库 | `DB_PORT` | 是 | `3306` |
+| 数据库 | `DB_USER` | 是 | `root` |
+| 数据库 | `DB_PASSWORD` | 否 | 留空 |
+| 数据库 | `DB_NAME` | 是 | `haibao` |
+| 服务 | `PORT` | 是 | `3001` |
+| 服务 | `AUTH_TOKEN` | 生产环境必填 | 不设置则不启用认证；`NODE_ENV=production` 下未设置会拒绝启动 |
+| 火山引擎 ARK | `ARK_API_KEY` | 否* | 主力文生图 + 增强的 Key |
+| 火山引擎 ARK | `ARK_BASE_URL` | 是 | `https://ark.cn-beijing.volces.com/api/v3` |
+| 火山引擎 ARK | `IMAGE_MODEL_ID` | 否* | 文生图推理端点 ID（doubao-seedream 系列） |
+| 火山引擎 ARK | `ENHANCE_MODEL_ID` | 否 | 图生图端点 ID（Seedream 5.0） |
+| 硅基流动 | `SILICONFLOW_API_KEY` | 否* | 备用文生图 Key |
+| 硅基流动 | `SILICONFLOW_BASE_URL` | 是 | `https://api.siliconflow.cn/v1` |
+| 硅基流动 | `SILICONFLOW_IMAGE_MODEL` | 是 | `baidu/ERNIE-Image-Turbo` |
+| DeepSeek | `DEEPSEEK_API_KEY` | 否 | 智能填充 / AI 帮写 / 文案解析所需 |
+| DeepSeek | `DEEPSEEK_BASE_URL` | 是 | `https://api.deepseek.com` |
+| DeepSeek | `DEEPSEEK_MODEL_ID` | 是 | `deepseek-v4-flash` |
 
-# 认证令牌 (可选，不设置则不启用认证)
-AUTH_TOKEN=your_secret_token
+\* 图像生成至少配置一组（ARK 或 SiliconFlow），否则海报生成报错。
 
-# SiliconFlow (主图像生成)
-SILICONFLOW_API_KEY=your_key
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_MODEL=Tongyi-MAI/Z-Image-Turbo
-
-# 火山引擎 ARK (备用图像生成 + 增强)
-VOLC_ACCESSKEY=your_key
-VOLC_SECRETKEY=your_secret
-VOLC_ENDPOINT_ID_SEEDREAM45=your_endpoint
-VOLC_ENDPOINT_ID_SEEDREAM50=your_endpoint
-
-# 小米 MiMo (文本 LLM)
-MIMO_API_KEY=your_key
-MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com
-MIMO_MODEL=mimo-v2.5-pro
-
-# 服务端口
-PORT=3001
-```
+配置优先级：`data/settings.json`（设置页写入，启动时覆盖 `process.env`）> `.env`。Key 也可在前端「设置」中热更新，无需重启。
 
 ### 3. 初始化数据库
 
 ```bash
 mysql -u root -p < database/schema.sql
-mysql -u root -p zbt < database/seed.sql
+mysql -u root -p haibao < database/seed.sql
 ```
 
 或使用迁移脚本：
@@ -247,7 +243,8 @@ rembg server
 
 ```
 用户填写向导 → 前端 Pinia store 组装数据 → POST /api/poster/back
-  → buildBackBgPrompt() 构造纯背景提示词
+  → buildBackBgPrompt() 构造反面底版提示词 (先用 computeLayout 推导真实版式分区，
+     把"活动承载带/自由装饰带"写进提示词，AI 放开设计装饰，仅承载带内需保持安静)
   → doubao.generateImage() 调 SiliconFlow (失败降级火山引擎 Seedream)
   → 下载 AI 图片为 Buffer
   → posterRenderer.renderBackPoster(bgBuffer, activities, ...)

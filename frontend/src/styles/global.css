@@ -1,16 +1,48 @@
 /* ========================================
-   Global Reset + Font Import
+   Editorial — 全局重置 / 字体 / 原子类
    ======================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+/* ---- 内嵌衬线字体（离线可用，不引用外网） ---- */
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/noto-serif-sc-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2070-209F,
+                 U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/noto-serif-sc-chinese-simplified-400-normal.woff2') format('woff2');
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3200-33FF, U+3400-4DBF,
+                 U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/noto-serif-sc-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2070-209F,
+                 U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/noto-serif-sc-chinese-simplified-700-normal.woff2') format('woff2');
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3200-33FF, U+3400-4DBF,
+                 U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
 
 *,
 *::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+*::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
   -webkit-font-smoothing: antialiased;
@@ -20,31 +52,269 @@ html {
 }
 
 body {
-  font-family: var(--md-font-family);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-  line-height: 1.5;
+  font-family: var(--ed-sans);
+  font-size: var(--ed-body);
+  line-height: 1.75;
+  background: var(--ed-paper);
+  color: var(--ed-ink);
   min-height: 100vh;
-  transition: background-color 0.3s var(--md-easing-standard),
-              color 0.3s var(--md-easing-standard);
 }
 
-input, button, textarea, select {
-  font-family: inherit;
+input, button, textarea, select { font-family: inherit; font-size: inherit; }
+
+/* 键盘可达性：全局焦点环（旧版完全缺失） */
+:focus-visible {
+  outline: 2px solid var(--ed-accent);
+  outline-offset: 2px;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* 滚动条：细线，无轨道背景 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--md-outline-variant); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--md-outline); }
+::-webkit-scrollbar-thumb { background: var(--ed-rule); }
+::-webkit-scrollbar-thumb:hover { background: var(--ed-ink-faint); }
 
-/* Selection */
-::selection {
-  background: rgba(59, 116, 241, 0.2);
-  color: var(--md-on-surface);
+::selection { background: var(--ed-accent-tint); color: var(--ed-ink); }
+
+a { color: var(--ed-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- 原子类（跨组件复用的最小单位） ---- */
+.ed-rule {
+  border: 0;
+  border-top: 1px solid var(--ed-rule);
+  width: 100%;
+}
+.ed-rule--strong { border-top: 1px solid var(--ed-rule-strong); }
+
+.ed-meta {
+  font-family: var(--ed-mono);
+  font-size: var(--ed-meta);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ed-ink-faint);
+  line-height: 1.5;
 }
 
-/* Transitions for dynamic color */
-a { color: var(--md-primary); text-decoration: none; }
-a:hover { text-decoration: underline; }
+.ed-label {
+  font-family: var(--ed-mono);
+  font-size: var(--ed-label);
+  letter-spacing: .06em;
+  color: var(--ed-ink-soft);
+  line-height: 1.4;
+}
+
+.ed-tag {
+  font-family: var(--ed-mono);
+  font-size: var(--ed-meta);
+  letter-spacing: .08em;
+  color: var(--ed-accent);
+}
+
+.ed-num {
+  font-family: var(--ed-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========================================
+   跨组件的版式词汇
+   ----------------------------------------------------------------
+   这一层必须放在 global.css，不能放在各组件的 <style scoped> 里。
+   Vue 的 scoped 样式会编译成 `.block[data-v-hash]`，而 hash 是各组件
+   自己的——Step2Promotions.vue 里写的 `class="block"` 拿不到
+   Step1FestivalBrand.vue 的 `.block[data-v-Step1]`，会静默变成无样式。
+   而且 `npm run build` 不会报错，残留计数也查不出来。
+   三个步骤页 + 两个弹窗共用这层词汇，所以它只有一个来源。
+   ======================================== */
+
+/* 版面分区内的子区块 */
+.block { margin-bottom: var(--ed-space-6); }
+.block:last-of-type { margin-bottom: var(--ed-space-5); }
+
+.block__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ed-space-3);
+  padding-bottom: var(--ed-space-3);
+  margin-bottom: var(--ed-space-4);
+  border-bottom: 1px solid var(--ed-rule);
+}
+.block__title { flex: 1; }
+.block__tip { margin: -8px 0 var(--ed-space-4); letter-spacing: .02em; text-transform: none; }
+
+/* 必选/选填统一徽章（与仅表状态的 .ed-tag 区分） */
+.ed-badge {
+  font-family: var(--ed-mono);
+  font-size: var(--ed-meta);
+  letter-spacing: .08em;
+  line-height: 1.6;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.ed-badge--req { color: var(--ed-danger); }
+.ed-badge--opt { color: var(--ed-ink-faint); }
+.req-star { color: var(--ed-danger); margin-left: 4px; }
+
+/* 字段堆叠 */
+.fields { display: flex; flex-direction: column; gap: var(--ed-space-4); }
+
+/* AI 帮写提示行（Step1 主题、Step2 主/次爆点共用） */
+.writer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ed-space-3);
+}
+.writer__hint { text-transform: none; letter-spacing: .02em; }
+
+/* 底部操作区 */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ed-space-4);
+  padding-top: var(--ed-space-4);
+}
+.actions__hint { text-transform: none; }
+
+/* 下划线文本行：品牌（Step1）与商家模板（Step3）共用 */
+.brands {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: var(--ed-space-5);
+}
+.brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ed-space-3) 0;
+  border: 0;
+  border-bottom: 1px solid var(--ed-rule);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ed-fast) var(--ed-ease);
+}
+.brand:hover { border-bottom-color: var(--ed-ink-faint); }
+.brand.is-selected { border-bottom-color: var(--ed-accent); }
+.brand__name { font-family: var(--ed-serif); font-size: 16px; font-weight: 700; color: var(--ed-ink); }
+.brand__desc { text-transform: none; letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand__tick { position: absolute; top: var(--ed-space-3); right: 0; color: var(--ed-accent); }
+
+@media (max-width: 900px) {
+  .brands { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .brands { grid-template-columns: 1fr; }
+}
+
+/* 错误 / 提示条：Step2 与 Step3 共用 */
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ed-space-3);
+  padding: var(--ed-space-3) var(--ed-space-4);
+  border-left: 2px solid var(--ed-danger);
+  background: var(--ed-danger-tint);
+  font-size: 13px;
+  color: var(--ed-ink);
+}
+
+/* 标签式切换：步骤栏（StepTabs）/ 活动弹窗内枚举 / 设置标签页 共用同一套下划线语言 */
+.tabline {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ed-space-6);
+  border-bottom: 1px solid var(--ed-rule);
+}
+.tabline__item {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--ed-space-2);
+  padding: var(--ed-space-3) 0;
+  border: 0;
+  background: transparent;
+  color: var(--ed-ink-faint);
+  font-family: var(--ed-sans);
+  font-size: var(--ed-body);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ed-fast) var(--ed-ease);
+}
+.tabline__item:hover:not(:disabled) { color: var(--ed-ink); }
+.tabline__item.is-active { color: var(--ed-ink); cursor: default; }
+.tabline__item:disabled { cursor: default; }
+.tabline__item::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ed-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--ed-base) var(--ed-ease);
+}
+.tabline__item.is-active::after { transform: scaleX(1); }
+
+/* ---- 全局 Toast（出口在 App.vue，useToast 单例推送） ---- */
+.toasts {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ed-space-2);
+  max-width: min(360px, calc(100vw - 48px));
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ed-space-3);
+  padding: var(--ed-space-3) var(--ed-space-4);
+  background: var(--ed-paper);
+  border: 1px solid var(--ed-rule);
+  border-left-width: 2px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ed-ink);
+  animation: toast-in var(--ed-base) var(--ed-ease);
+}
+.toast__mark {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--ed-accent);
+}
+.toast__msg { min-width: 0; }
+.toast--success { border-left-color: var(--ed-ok); }
+.toast--success .toast__mark { background: var(--ed-ok); }
+.toast--error { border-left-color: var(--ed-danger); }
+.toast--error .toast__mark { background: var(--ed-danger); }
+.toast--warning { border-left-color: #8f5e1b; }
+.toast--warning .toast__mark { background: #8f5e1b; }
+.toast--info { border-left-color: var(--ed-accent); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- 无障碍：尊重系统「减少动态效果」 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -4,25 +4,15 @@ const fs = require('fs');
 const path = require('path');
 const doubao = require('../services/doubao');
 const deepseek = require('../services/deepseek');
+const { CONFIG_FIELDS } = require('../configFields');
 
 const SETTINGS_FILE = path.join(__dirname, '../../../data/settings.json');
-
-const CONFIG_FIELDS = [
-  { key: 'ARK_API_KEY', label: 'ARK API Key', group: '火山引擎 ARK', type: 'password' },
-  { key: 'ARK_BASE_URL', label: 'ARK 接入地址', group: '火山引擎 ARK', type: 'text' },
-  { key: 'IMAGE_MODEL_ID', label: '文生图端点 ID', group: '火山引擎 ARK', type: 'text' },
-  { key: 'ENHANCE_MODEL_ID', label: '图生图端点 ID (Seedream 5.0)', group: '火山引擎 ARK', type: 'text' },
-  { key: 'SILICONFLOW_API_KEY', label: 'SiliconFlow API Key', group: '硅基流动', type: 'password' },
-  { key: 'SILICONFLOW_BASE_URL', label: 'SiliconFlow 接入地址', group: '硅基流动', type: 'text' },
-  { key: 'SILICONFLOW_IMAGE_MODEL', label: '图像模型', group: '硅基流动', type: 'text' },
-  { key: 'DEEPSEEK_API_KEY', label: 'DeepSeek API Key', group: 'DeepSeek', type: 'password' },
-  { key: 'DEEPSEEK_BASE_URL', label: 'DeepSeek 接入地址', group: 'DeepSeek', type: 'text' },
-  { key: 'DEEPSEEK_MODEL_ID', label: 'DeepSeek 模型 ID', group: 'DeepSeek', type: 'text' },
-];
+const ENV_FILE = path.join(__dirname, '../../.env');
 
 function maskKey(val) {
-  if (!val || val.length <= 10) return val || '';
-  return val.slice(0, 10) + '***';
+  if (!val) return '';
+  if (val.length <= 4) return '****';
+  return '****' + val.slice(-4);
 }
 
 function loadSettings() {
@@ -40,6 +30,18 @@ function saveSettings(data) {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
+// 每次 PUT 最多读盘解析一次（清除多个字段时共用同一份映射）
+function readEnvFile() {
+  try {
+    if (fs.existsSync(ENV_FILE)) {
+      return require('dotenv').parse(fs.readFileSync(ENV_FILE));
+    }
+  } catch (e) {
+    console.error('[Settings] 读取 .env 默认值失败:', e.message);
+  }
+  return {};
+}
+
 // 启动时调用：用 settings.json 覆盖 process.env
 function applySettings() {
   const saved = loadSettings();
@@ -48,6 +50,12 @@ function applySettings() {
       process.env[key] = val;
     }
   }
+  // 服务实例是在 require('../services/xxx') 那一刻按当时的环境变量构造的，
+  // 而这里（app.js 第 55 行）已经是 require 之后，只改 process.env 追不上已构造的实例。
+  // 不显式重载的话，settings.json 里的 Key / 模型 ID 在启动阶段完全不生效，
+  // 实际用的是 .env 的旧值——表现为「保存过的配置重启后失效」。
+  doubao.reload();
+  deepseek.reload();
   return saved;
 }
 
@@ -89,12 +97,15 @@ router.put('/', (req, res) => {
 
     const saved = loadSettings();
     const validKeys = new Set(CONFIG_FIELDS.map(f => f.key));
+    const envDefaults = readEnvFile();
 
     for (const [key, val] of Object.entries(updates)) {
       if (!validKeys.has(key)) continue;
       if (val === '' || val === null) {
         delete saved[key];
-        delete process.env[key];
+        const envDefault = envDefaults[key];
+        if (envDefault === undefined) delete process.env[key];
+        else process.env[key] = envDefault;
       } else {
         saved[key] = val;
         process.env[key] = val;

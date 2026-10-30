@@ -5,8 +5,10 @@
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const { findLocalFile } = require('./imageStore');
 
-const UPLOAD_DIR = path.join(__dirname, '../../../data/uploads');
+// 底部商家信息带的顶边比例：提示词（prompts/back.js）与渲染器必须共用，避免文字画进商家带
+const MERCHANT_BAND_TOP = 0.955;
 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -310,7 +312,8 @@ function computeLayout(activities, W, H) {
   const rowGap = Math.round(H * 0.0075);
   const minModuleH = Math.round(H * 0.10);
 
-  const midZoneTop = Math.round(H * 0.05);
+  // 标题块画在 0.065~0.105，卡片必须从其下方开始，否则标题被卡片遮挡
+  const midZoneTop = Math.round(H * 0.12);
   const midZoneBottom = Math.round(H * 0.85);
   const midZoneH = midZoneBottom - midZoneTop;
 
@@ -527,6 +530,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
   const { W, H, M, sidePad, rowGap, rowHs, rowPattern } = layout;
   const { primaryColor, secondaryColor, bgColor } = options;
   const accentColor = primaryColor || '#FFD700';
+  const softColor = secondaryColor || '#F5C76B';
 
   const fontFamily = `font-family="'Noto Serif SC','Source Han Serif SC','STSong','SimSun','FangSong',serif"`;
 
@@ -536,7 +540,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
   const parts = [];
   parts.push(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
 
-  // 为每个模块定义裁剪区域
+  // 每个活动卡片单独裁剪，保证长文案与商品图不串位。
   const defs = ['<defs>'];
   M.forEach((md, i) => {
     const bottomLimit = Math.round(H * 0.97);
@@ -549,29 +553,13 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
   defs.push('</defs>');
   parts.push(defs.join('\n'));
 
-  // 计算所有活动模块的整体包围盒
-  const padExtra = Math.round(W * 0.01125);
-  const outerRadius = Math.round(W * 0.01125);
-
-  if (M.length > 0) {
-    let minX = Infinity, maxX = 0, minY = Infinity, maxY = 0;
-    M.forEach(md => {
-      minX = Math.min(minX, md.cardX);
-      maxX = Math.max(maxX, md.cardX + md.cardW);
-      minY = Math.min(minY, md.y);
-      maxY = Math.max(maxY, md.y + md.rowH);
-    });
-
-    // 白色半透明大容器
-    const maxAllowedY = Math.round(H * 0.97);
-    const outerX = minX - padExtra;
-    const outerY = minY - padExtra;
-    const outerW = (maxX - minX) + padExtra * 2;
-    const outerH = Math.min((maxY - minY) + padExtra * 2, maxAllowedY - outerY);
-    if (outerH > 0) {
-      parts.push(`<rect x="${outerX}" y="${outerY}" width="${outerW}" height="${outerH}" rx="${outerRadius}" fill="white" opacity="0.75"/>`);
-    }
-  }
+  const headerY = Math.round(H * 0.065);
+  const headerSize = Math.round(H * 0.032);
+  const ruleY = Math.round(H * 0.105);
+  const sectionSize = Math.round(H * 0.017);
+  parts.push(`<text x="${W / 2}" y="${headerY}" ${fontFamily} font-size="${headerSize}px" font-weight="700" fill="#FFFFFF" text-anchor="middle">${esc(brand || '品牌活动')}</text>`);
+  parts.push(`<text x="${W / 2}" y="${headerY + Math.round(headerSize * 0.95)}" ${fontFamily} font-size="${sectionSize}px" letter-spacing="${Math.round(W * 0.012)}px" fill="${softColor}" text-anchor="middle">活动礼遇 · 精选优惠</text>`);
+  parts.push(`<line x1="${Math.round(W * 0.12)}" y1="${ruleY}" x2="${Math.round(W * 0.88)}" y2="${ruleY}" stroke="${softColor}" stroke-opacity="0.55" stroke-width="${Math.max(2, Math.round(W * 0.001))}"/>`);
 
   // 活动模块
   M.forEach((md, mi) => {
@@ -583,11 +571,12 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
     const radius = Math.round(W * 0.01);
     const strokeW = Math.round(W * 0.0015);
 
-    // 模块背景：优先使用节日bgColor，混合白色变浅
-    const rawBg = bgColor || md.act.bgColor || '#2a2a5a';
-    const moduleBg = lightenColor(rawBg, 0.08);
-
-    parts.push(`<rect x="${md.cardX}" y="${my}" width="${md.cardW}" height="${clipH}" rx="${radius}" fill="${moduleBg}" stroke="${accentColor}" stroke-opacity="0.50" stroke-width="${strokeW}"/>`);
+    const rawBg = bgColor || md.act.bgColor || '#241B2A';
+    const moduleBg = lightenColor(rawBg, 0.16);
+    const label = String(md.act.discountType || `活动 ${mi + 1}`);
+    parts.push(`<rect x="${md.cardX}" y="${my}" width="${md.cardW}" height="${clipH}" rx="${radius}" fill="${moduleBg}" fill-opacity="0.92" stroke="${softColor}" stroke-opacity="0.72" stroke-width="${strokeW}"/>`);
+    parts.push(`<rect x="${md.cardX}" y="${my}" width="${Math.max(8, Math.round(W * 0.006))}" height="${clipH}" rx="${radius}" fill="${accentColor}"/>`);
+    parts.push(`<text x="${md.cardX + Math.round(W * 0.028)}" y="${my + Math.round(H * 0.035)}" ${fontFamily} font-size="${Math.round(H * 0.014)}px" fill="${softColor}" letter-spacing="${Math.round(W * 0.004)}px">${esc(label)}</text>`);
 
     // 裁剪组：防止文字溢出模块边界
     parts.push(`<g clip-path="url(#mclip${mi})">`);
@@ -656,7 +645,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
 
   // ===== 底部商家信息（一行排列，节日色，渐变背景） =====
   if (merchantInfo && (merchantInfo.name || merchantInfo.address || merchantInfo.phone)) {
-    const bottomY = Math.round(H * 0.955);
+    const bottomY = Math.round(H * MERCHANT_BAND_TOP);
     const fontS = Math.round(H * 0.021);
 
     // 所有信息拼成一行
@@ -667,7 +656,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
     const line = parts_list.join('  |  ');
 
     const textY = bottomY + Math.round(fontS * 0.75);
-    const textColor = darkenColor(accentColor || '#FFD700', 0.25);
+    const textColor = '#FFFFFF';
 
     // 渐变背景框
     const textW = estimateWidth(line, fontS);
@@ -679,16 +668,7 @@ function buildBackSvg(layout, brand, merchantInfo, options = {}) {
     const boxY = textY - fontS - boxPadY + Math.round(fontS * 0.1);
     const boxR = Math.round(W * 0.012);
 
-    // 渐变：中心不透明 -> 两端透明
-    const gradId = 'merchantGrad';
-    parts.push(`<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0">`);
-    parts.push(`<stop offset="0%" stop-color="white" stop-opacity="0"/>`);
-    parts.push(`<stop offset="15%" stop-color="white" stop-opacity="0.75"/>`);
-    parts.push(`<stop offset="50%" stop-color="white" stop-opacity="0.85"/>`);
-    parts.push(`<stop offset="85%" stop-color="white" stop-opacity="0.75"/>`);
-    parts.push(`<stop offset="100%" stop-color="white" stop-opacity="0"/>`);
-    parts.push(`</linearGradient></defs>`);
-    parts.push(`<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${boxR}" fill="url(#${gradId})"/>`);
+    parts.push(`<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${boxR}" fill="${bgColor || '#1F1724'}" fill-opacity="0.88" stroke="${softColor}" stroke-opacity="0.65" stroke-width="${Math.max(2, Math.round(W * 0.001))}"/>`);
 
     parts.push(`<text x="${W / 2}" y="${textY}" ${fontFamily} font-size="${fontS}px" font-weight="700" fill="${textColor}" text-anchor="middle">${esc(line)}</text>`);
   }
@@ -748,9 +728,9 @@ async function resolveImageBuffer(url) {
     const base64 = url.split(',')[1];
     return base64 ? Buffer.from(base64, 'base64') : null;
   }
-  // 磁盘文件
-  const localPath = path.join(UPLOAD_DIR, path.basename(url));
-  if (fs.existsSync(localPath)) return fs.readFileSync(localPath);
+  // 磁盘文件（持久目录优先，临时目录兜底）
+  const localPath = findLocalFile(url);
+  if (localPath) return fs.readFileSync(localPath);
   return null;
 }
 
@@ -777,6 +757,19 @@ async function composeProductImages(imageBuffer, layout) {
   return await sharp(imageBuffer).composite(overlays).png().toBuffer();
 }
 
+/**
+ * 把 AI 背景对齐到目标画布后再叠文字。
+ * 出图模型有单张面积上限（见 doubao.js 的 ARK_MAX_AREA），求 2100x2970 时
+ * 实际可能只返回 1800x2552；而 sharp 的 composite 要求覆盖层不大于底图，
+ * 尺寸不一致会直接抛 "Image to composite must have same dimensions or smaller"。
+ */
+async function fitBackgroundToCanvas(backgroundBuffer, W, H) {
+  const meta = await sharp(backgroundBuffer).metadata();
+  if (meta.width === W && meta.height === H) return backgroundBuffer;
+  console.log(`[posterRenderer] 背景 ${meta.width}x${meta.height} 与画布 ${W}x${H} 不一致，先等比拉到画布尺寸`);
+  return await sharp(backgroundBuffer).resize(W, H, { fit: 'cover' }).png().toBuffer();
+}
+
 // ===== 入口 =====
 async function renderBackPoster(backgroundBuffer, activities, merchantInfo, brand, options = {}) {
   const W = options.width || 2100;
@@ -784,7 +777,8 @@ async function renderBackPoster(backgroundBuffer, activities, merchantInfo, bran
   const layout = computeLayout(activities, W, H);
   if (!layout) return backgroundBuffer;
   const svg = buildBackSvg(layout, brand, merchantInfo, options);
-  const withText = await sharp(backgroundBuffer).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
+  const bg = await fitBackgroundToCanvas(backgroundBuffer, W, H);
+  const withText = await sharp(bg).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
   return await composeProductImages(withText, layout);
 }
 
@@ -827,7 +821,8 @@ async function renderCarSticker(backgroundBuffer, data, options = {}) {
   parts.push('</svg>');
   const svg = parts.join('\n');
 
-  return await sharp(backgroundBuffer).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
+  const bg = await fitBackgroundToCanvas(backgroundBuffer, W, H);
+  return await sharp(bg).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
 }
 
 // ===== Leafer UI JSON 构建器 =====
@@ -1047,8 +1042,7 @@ function buildLeaferJson(layout, brand, merchantInfo, bgImageUrl, options = {}) 
         const url = md.act.imageUrls[j];
         if (!url) continue;
         const offsetX = j * (md.imgCardSize + Math.round(layout.W * 0.01));
-        const localPath = path.join(UPLOAD_DIR, path.basename(url));
-        const imgUrl = fs.existsSync(localPath) ? `/uploads/${path.basename(url)}` : url;
+        const imgUrl = findLocalFile(url) ? `/uploads/${path.basename(url)}` : url;
         groupChildren.push({
           tag: 'Image2', name: `活动${idx + 1}-商品图${j + 1}`,
           x: md.imgX - md.cardX + offsetX, y: md.imgY - md.y,
@@ -1072,7 +1066,7 @@ function buildLeaferJson(layout, brand, merchantInfo, bgImageUrl, options = {}) 
 
   // 底部商家信息
   if (merchantInfo && (merchantInfo.name || merchantInfo.address || merchantInfo.phone)) {
-    const bottomY = Math.round(H * 0.955);
+    const bottomY = Math.round(H * MERCHANT_BAND_TOP);
     const fontS = Math.round(H * 0.021);
     const parts_list = [];
     if (merchantInfo.name) parts_list.push(merchantInfo.name);
@@ -1369,4 +1363,4 @@ function buildCarStickerJson(data, bgImageUrl, options = {}) {
   };
 }
 
-module.exports = { renderBackPoster, renderCarSticker, computeLayout, buildLeaferJson, buildFrontLeaferJson, buildCarStickerJson };
+module.exports = { renderBackPoster, renderCarSticker, computeLayout, buildLeaferJson, buildFrontLeaferJson, buildCarStickerJson, MERCHANT_BAND_TOP };

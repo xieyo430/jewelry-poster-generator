@@ -77,18 +77,48 @@ function pickContrastColorName(bgColor, color1, color2) {
   }
 }
 
-function getFestivalBgDesign(festivalId) {
+function getIndustryVisual(industry) {
+  if (industry === 'food') {
+    return {
+      name: '餐饮美食',
+      style: '温暖鲜明、富有烟火气与食欲感，突出真实食材纹理、菜品层次和新鲜热气',
+      decor: '新鲜食材、招牌菜品、餐桌器皿、蒸汽热气与暖色食欲光',
+      focus: '菜品与套餐优惠',
+    }
+  }
+  if (industry === 'electronics') {
+    return {
+      name: '数码家电',
+      style: '现代清晰、有科技感，突出真实产品轮廓、屏幕光效和简洁的性能氛围',
+      decor: '手机、耳机、智能家电的简洁轮廓、屏幕光效与科技光轨',
+      focus: '数码产品与价格优惠',
+    }
+  }
+  return {
+    name: '珠宝饰品',
+    style: '高端、精致、奢华，突出金属光泽与珠宝质感',
+    decor: '金属光泽、宝石折射、珠宝细节与优雅光点',
+    focus: '珠宝与价格优惠',
+  }
+}
+
+function getFestivalBgDesign(festivalId, industry = 'jewelry') {
   // 统一格式：节日色渐变 + 边缘少量节日物品和珠宝装饰
   const designs = {
     'spring-festival': {
-      color: '以红色为主色调，从深红渐变到亮红，搭配鎏金色点缀',
+      color: '以红色为主色调，从深血红渐变到鲜亮的中国红，搭配鎏金色点缀',
       deco: '画面四周和边缘装饰红灯笼、祥云、烟花、鞭炮、福字、春联剪影、金色元宝、红宝石闪光、金珠散落等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
       ban: '严禁出现绿色、蓝色等非春节配色',
     },
+    'national-day': {
+      color: '以国旗红色为主色调，从深绛红渐变到鲜亮的旗帜红，搭配五星明黄色点缀',
+      deco: '画面四周和边缘装饰金色五角星、华表与天安门剪影、红绸、和平鸽、礼花、金珠散落等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
+      ban: '严禁出现紫色、绿色等非国庆配色',
+    },
     'yuanxiao': {
-      color: '以暖橙红色为主色调，搭配金色点缀',
-      deco: '画面四周和边缘装饰花灯、圆月、祥云、汤圆、灯谜条幅、珍珠光点、金色吊坠、琥珀散光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
-      ban: '',
+      color: '以靛蓝色夜空为主色调，画面下方晕染花灯透出的暖橙色光，搭配月白色点缀',
+      deco: '画面四周和边缘装饰透出暖光的花灯、圆月、祥云、汤圆、灯谜条幅、珍珠光点、金色吊坠、琥珀散光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
+      ban: '严禁大面积使用纯红色，避免与春节雷同',
     },
     'dragon-boat': {
       color: '以翠绿色为主色调，从深绿渐变到青绿，搭配金色点缀',
@@ -131,7 +161,7 @@ function getFestivalBgDesign(festivalId) {
       ban: '',
     },
     'valentine': {
-      color: '以粉红色为主色调，从浅粉渐变到玫瑰红，搭配金色点缀',
+      color: '以深玫瑰红色为主色调，从酒红渐变到玫红，搭配藕粉色点缀',
       deco: '画面四周和边缘装饰玫瑰花瓣、爱心、蝴蝶结、巧克力、情书、丘比特剪影、粉水晶光泽、玫瑰金细链、红宝石散光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
       ban: '严禁出现绿色、蓝色等冷色调',
     },
@@ -141,8 +171,23 @@ function getFestivalBgDesign(festivalId) {
       ban: '',
     },
     '520-day': {
-      color: '以玫红色为主色调，从深粉渐变到炽热红，搭配金色点缀',
+      color: '以鲜亮的珊瑚红色为主色调，搭配暖橙色点缀',
       deco: '画面四周和边缘装饰爱心、玫瑰、星光、气球、情书、告白气球、红宝石光泽、金色心形吊坠、粉钻闪光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
+      ban: '',
+    },
+    'new-year': {
+      color: '以深蓝色跨年夜空为主色调，搭配香槟金色烟花和暖红色点缀',
+      deco: '画面四周和边缘装饰绽放的烟花、气球、彩带、礼花、金色光点、钻石微光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
+      ban: '',
+    },
+    'grand-opening': {
+      color: '以朱红色为主色调，搭配鎏金色点缀',
+      deco: '画面四周和边缘装饰开业花篮、红绸、礼花、迎宾灯笼柱、金色牌匾、金箔、钻石微光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
+      ban: '',
+    },
+    'women-day': {
+      color: '以玫金粉色为主色调，搭配香槟金色点缀',
+      deco: '画面四周和边缘装饰花朵、丝带、蝴蝶、爱心、珍珠光泽、玫瑰金细链、粉钻微光等节日与珠宝元素，装饰要精致华丽但不遮挡中央文字',
       ban: '',
     },
   };
@@ -154,6 +199,23 @@ function getFestivalBgDesign(festivalId) {
       '- 以节日主色的大面积渐变为背景主体',
       '- 画面边缘点缀少量金色细线和钻石微光，中间区域保持干净',
     ].join('\n');
+  }
+
+  if (industry !== 'jewelry') {
+    const visual = getIndustryVisual(industry)
+    const festivalDecor = d.deco
+      .replace(/红宝石闪光|金珠散落|珍珠光点|金色吊坠|琥珀散光|翡翠光泽|金色细链|绿松石光点|钻石星辉|月光石光泽|银色星点|琥珀光泽|金色饰纹|蜜蜡光晕|翡翠淡绿光晕|银白细链|雪花形钻石闪光|铂金光泽|钻石闪光|钻石微光|粉水晶光泽|玫瑰金细链|粉钻闪光|金色心形吊坠|珍珠光泽/g, '')
+      .replace(/等节日与珠宝元素/g, '')
+      .replace(/、{2,}/g, '、')
+      .replace(/、+([，,])/g, '$1')
+      .replace(/[、，\s]+$/, '')
+    return [
+      '背景设计：',
+      `- ${d.color}`,
+      `- ${festivalDecor}，融入${visual.decor}，构图有节日氛围但不遮挡中央文字`,
+      '- 装饰分布在画面边缘，中央信息区保持干净清晰',
+      d.ban && `- ${d.ban}`,
+    ].filter(Boolean).join('\n')
   }
 
   const lines = [
@@ -193,10 +255,38 @@ function buildFrontPrompt(data) {
   const { brand, theme, subtitle, startDate, endDate, mainPromotion, secondaryPromotion,
           mainTitle, subTitle, secMainTitle, secSubTitle,
           colorScheme, primaryColor, secondaryColor, bgColor, festivalId } = data;
+  const visual = getIndustryVisual(data.industry)
 
   const primaryName = hexToColorName(primaryColor) || '主色';
   const secondaryName = hexToColorName(secondaryColor) || '辅助色';
   const bgName = hexToColorName(bgColor) || '深色';
+
+  if (data.industry === 'food') {
+    const food = data.foodCampaign || {};
+    const mode = food.mode === 'combo' ? '套餐促销' : food.mode === 'store-event' ? '门店活动' : '招牌菜推荐';
+    const foodTexts = [brand, theme, subtitle, mainTitle, subTitle, secMainTitle, secSubTitle,
+      food.dishName, food.sellingPoints, food.setContents, food.eventType, food.eventRule,
+      food.gift, food.actionText, food.promoPrice, food.originalPrice].filter(Boolean);
+    const dateText = startDate && endDate ? `${startDate} 至 ${endDate}` : startDate ? `${startDate}起` : '';
+    if (dateText) foodTexts.push(dateText);
+    return [
+      `你是餐饮美食行业的专业平面设计师，生成一张竖版${mode}海报正面。`,
+      '这不是珠宝海报，不要使用珠宝、金属、钻石、首饰、奢华礼盒或节日珠宝装饰。',
+      '',
+      '【文字白名单】海报只允许出现以下文字，必须逐字显示，不得新增、改写或重复：',
+      ...[...new Set(foodTexts)].map(text => `  "${text}"`),
+      '除白名单外不得出现任何文字、数字、英文、二维码、水印或平台标识。',
+      '',
+      `视觉方向：${visual.style}。使用${primaryName}作为主色、${secondaryName}作为强调色、${bgName}作为背景。`,
+      '整张画面铺满，采用真实美食摄影广告感：自然光、食材纹理、热气、酱汁光泽、餐桌质感，主体清晰且有食欲。',
+      food.dishImageUrl ? '优先围绕用户提供的真实菜品图片进行主视觉构图，不要重新捏造完全不同的菜品。' : '主视觉使用清晰、真实、可辨认的菜品或套餐摆盘，不要使用抽象珠宝物件。',
+      mode === '招牌菜推荐' ? '布局：顶部品牌名；中部大面积菜品主视觉；下方突出菜品名、口味卖点和价格/优惠；行动文案放在底部清晰位置。' :
+        mode === '套餐促销' ? '布局：顶部品牌名；中部展示套餐组合；下方用清晰价格对比突出原价与活动价、适用人数和立即预订行动。' :
+          '布局：顶部品牌名；中部以活动机制和优惠数字为第一视觉；下方补充赠品、参与方式和到店行动。',
+      '文字区域保持干净，有足够留白和高对比度，任何背景纹理、食物或装饰都不得覆盖文字。',
+      '禁止大面积不透明色块遮挡菜品，禁止双图堆叠造成主体覆盖，禁止乱码、重复品牌名和无关文案。',
+    ].join('\n');
+  }
 
   // 收集所有必须显示的文案，用引号明确标出
   const allTexts = [brand, theme, subtitle, mainTitle, subTitle, secMainTitle, secSubTitle].filter(Boolean);
@@ -204,7 +294,7 @@ function buildFrontPrompt(data) {
   const parts = [];
 
   // 严格声明
-  parts.push('你是一个专业海报设计师，正在生成一张竖版高端珠宝促销海报。');
+  parts.push(`你是${visual.name}行业的专业海报设计师，正在生成一张竖版${visual.name}促销海报。`);
   parts.push('');
   parts.push('【最重要的规则】');
   parts.push('海报上允许出现的文字有且仅有以下这些，用引号标出，多一个字都不行：');
@@ -215,11 +305,11 @@ function buildFrontPrompt(data) {
   parts.push('');
 
   // 整体风格
-  parts.push(`整体为高端奢华珠宝风格，配色方案：${colorScheme}，使用${primaryName}作为主色调，${secondaryName}作为辅助色，${bgName}作为背景基底。整张画面从上到下铺满，不留空白边缘。`);
+  parts.push(`整体采用${visual.style}。配色方案：${colorScheme}，使用${primaryName}作为主色调，${secondaryName}作为辅助色，${bgName}作为背景基底。围绕${visual.focus}设计主视觉，整张画面从上到下铺满，不留空白边缘。`);
 
   // 节日背景
   parts.push('');
-  parts.push(getFestivalBgDesign(festivalId));
+  parts.push(getFestivalBgDesign(festivalId, data.industry));
 
   // 布局
   parts.push('');
@@ -253,7 +343,7 @@ function buildFrontPrompt(data) {
     parts.push(`在色块内居中显示"${mainTitle}"，字号非常大而醒目，使用特大号加粗白色字体，带有发光或描边效果，确保一眼就能看到。`);
     if (/\d+/.test(mainTitle)) {
       const nums = mainTitle.match(/\d+/g)?.join('、');
-      parts.push(`其中的价格数字${nums}必须额外突出：更大字号、加粗、颜色改为金色或鎏金色，与周围白色文字形成对比。`);
+      parts.push(`其中的价格数字${nums}必须额外突出：更大字号、加粗、使用${secondaryName}或高对比亮色，与周围文字形成对比。`);
     }
   }
   if (subTitle) {
@@ -291,13 +381,14 @@ function buildFrontPrompt(data) {
  */
 function buildFrontBgPrompt(data) {
   const { colorScheme, primaryColor, secondaryColor, bgColor, festivalId } = data;
+  const visual = getIndustryVisual(data.industry)
 
   const primaryName = hexToColorName(primaryColor) || '主色';
   const secondaryName = hexToColorName(secondaryColor) || '辅助色';
   const bgName = hexToColorName(bgColor) || '深色';
 
   const parts = [];
-  parts.push('生成一张竖版纯装饰背景图，这是珠宝促销海报的正面。');
+  parts.push(`生成一张竖版纯装饰背景图，这是${visual.name}促销海报的正面；采用${visual.style}。`);
   parts.push('');
   parts.push('【配色】');
   parts.push(`- 整体色调：以${bgName}为主基调，${primaryName}为辅助色调`);
@@ -305,13 +396,13 @@ function buildFrontBgPrompt(data) {
   parts.push(`- ${secondaryName}仅作为极少量的光晕点缀，不可大面积使用`);
   parts.push('');
   parts.push('【背景设计】');
-  parts.push(getFestivalBgDesign(festivalId));
+  parts.push(getFestivalBgDesign(festivalId, data.industry));
   parts.push('');
   parts.push('【风格要求】');
   parts.push('- 海报从上到下分为三个视觉区域：顶部品牌区、中部主题区、下半部促销区');
   parts.push(`- 顶部区域：简洁干净，大面积${bgName}渐变，为品牌名留白`);
   parts.push(`- 中部区域：${primaryName}渐变过渡，装饰元素逐渐增多`);
-  parts.push('- 下半部促销区：最华丽的装饰区域，珠宝光效、节日元素集中在此');
+  parts.push(`- 下半部促销区：${visual.decor}与节日元素集中在此，保持商品真实、简洁、易识别`);
   parts.push('- 装饰元素分布在画面四周和边缘，丰富但不遮挡中央文字区域');
   parts.push('- 整张画面铺满，不留空白边缘');
   parts.push('');
@@ -326,4 +417,4 @@ function buildFrontBgPrompt(data) {
   return parts.join('\n');
 }
 
-module.exports = { buildFrontPrompt, buildFrontBgPrompt, getFestivalBgDesign };
+module.exports = { buildFrontPrompt, buildFrontBgPrompt, getFestivalBgDesign, getIndustryVisual };

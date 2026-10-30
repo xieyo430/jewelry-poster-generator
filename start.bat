@@ -16,7 +16,7 @@ timeout /t 2 /nobreak >nul
 :: 启动前端
 echo [2/2] 启动前端开发服务器...
 cd /d %~dp0frontend
-start "haibao-frontend" cmd /c "npx vite --host"
+start "haibao-frontend" cmd /c "npx vite"
 
 echo.
 echo ========================================

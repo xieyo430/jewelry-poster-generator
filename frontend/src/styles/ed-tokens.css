@@ -1,0 +1,73 @@
+/* ========================================
+   Editorial — 设计变量
+   只有变量，没有选择器。
+   ======================================== */
+
+:root {
+  /* ---- 纸与墨 ---- */
+  --ed-paper: #FBFAF7;
+  --ed-paper-deep: #F4F1EA;
+  --ed-ink: #16150F;
+  --ed-ink-soft: #4A4740;
+  --ed-ink-faint: #8C877C;
+
+  /* ---- 线（取代圆角边框与投影） ---- */
+  --ed-rule: #DAD5C9;
+  --ed-rule-strong: #16150F;
+
+  /* ---- 状态 ---- */
+  --ed-danger: #9B2C1F;
+  --ed-danger-tint: #F7E9E6;
+  --ed-ok: #2F6B45;
+
+  /* ---- 点睛色（默认靛蓝；由 color.js 按节日主色覆写） ---- */
+  --ed-accent: #5367D9;
+  --ed-accent-deep: #3848A8;
+  --ed-accent-tint: #EEF0FF;
+
+  /* ---- 节日工作台主题（由 color.js 在选择节日后覆写） ---- */
+  --theme-primary: #5367D9;
+  --theme-primary-raw: #7184FF;
+  --theme-primary-deep: #3848A8;
+  --theme-secondary: #B28BFF;
+  --theme-secondary-raw: #B28BFF;
+  --theme-bg: #18213B;
+  --theme-deep: #151923;
+  --theme-wash: #F1F3F9;
+  --theme-surface: #FFFFFF;
+  --theme-soft: #EEF0FF;
+  --theme-border: #BBC3F7;
+  --theme-on-primary: #FFFFFF;
+  --theme-on-deep: #FFFFFF;
+  --theme-glow: rgba(83, 103, 217, .14);
+  --theme-glow-secondary: rgba(178, 139, 255, .12);
+
+  /* ---- 字体 ---- */
+  --ed-serif: 'Noto Serif SC', 'Songti SC', 'SimSun', Georgia, serif;
+  --ed-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+             'Microsoft YaHei', 'PingFang SC', sans-serif;
+  --ed-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* ---- 字号 ---- */
+  --ed-display: 44px;
+  --ed-title: 28px;
+  --ed-subhead: 17px;
+  --ed-body: 15px;
+  --ed-label: 12px;
+  --ed-meta: 11px;
+
+  /* ---- 间距 ---- */
+  --ed-space-1: 4px;
+  --ed-space-2: 8px;
+  --ed-space-3: 12px;
+  --ed-space-4: 20px;
+  --ed-space-5: 32px;
+  --ed-space-6: 56px;
+  --ed-space-7: 88px;
+
+  /* ---- 形状与动效 ---- */
+  --ed-radius: 0;
+  --ed-ease: cubic-bezier(.2, .6, .2, 1);
+  --ed-fast: 120ms;
+  --ed-base: 200ms;
+}

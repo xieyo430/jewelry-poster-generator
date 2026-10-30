@@ -1,11 +1,16 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { usePosterStore } from '../store/poster'
 import api from '../api'
 import { useToast } from '../composables/useToast'
 import EnhancePanel from './EnhancePanel.vue'
+import EdButton from './common/EdButton.vue'
+import EdIcon from './common/EdIcon.vue'
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const store = usePosterStore()
 const enhancing = computed(() => store?.enhancing ?? false)
@@ -17,6 +22,7 @@ const showOriginalFront = ref(false)
 const showOriginalBack = ref(false)
 const lightboxUrl = ref(null)
 const downloading = ref(new Set())
+const saving = ref(false)
 
 const displayFrontUrl = computed(() =>
   store.enhancedFrontUrl && !showOriginalFront.value ? store.enhancedFrontUrl : store.frontPosterUrl
@@ -31,31 +37,68 @@ const hasBack = computed(() => !!store.backPosterUrl)
 const hasCarSticker = computed(() => !!store.carStickerUrl)
 const isPoster = computed(() => !store.carStickerUrl)
 
-const brandName = computed(() => store.brands.find(b => b.id === store.brand)?.name || store.brand)
+const brandName = computed(() => store.displayBrandName || store.brand)
 const festivalName = computed(() => store.festivals.find(f => f.id === store.festival)?.name || store.festival)
 
 const handleSaveProject = async () => {
+  if (saving.value) return
+  saving.value = true
+  store.projectStatus = 'saving'
+  store.saveError = null
   try {
+    const projectTitle = store.projectTitle || store.suggestedProjectTitle
+    const rawData = { ...store.$state }
+    delete rawData.frontPosterUrl
+    delete rawData.backPosterUrl
+    delete rawData.carStickerUrl
+    delete rawData.backBgImageUrl
+    delete rawData.enhancedFrontUrl
+    delete rawData.enhancedBackUrl
     const res = await api.saveProject({
+      title: projectTitle,
+      projectId: store.projectId || undefined,
       materialType: store.materialType,
-      festival: store.festival,
-      brand: store.brand,
+      festivalCode: store.festival,
+      brandCode: store.industry === 'jewelry' ? store.brand : null,
       startDate: store.startDate,
       endDate: store.endDate,
+      theme: store.theme,
+      subtitle: store.subtitle,
       mainPromotion: store.mainPromotion,
       secondaryPromotion: store.secondaryPromotion,
       activities: store.activities,
       merchantInfo: store.merchantInfo,
       frontPosterUrl: store.frontPosterUrl,
       backPosterUrl: store.backPosterUrl,
+      backBgUrl: store.backBgImageUrl,
       carStickerUrl: store.carStickerUrl,
       carStickerText: store.carStickerText,
       carStickerSize: store.carStickerSize,
       colorScheme: store.colorScheme,
+      rawData,
     })
-    if (res.data.success) toast.success(`项目已保存 (ID: ${res.data.projectId})`)
+    if (res.data.success) {
+      const savedProjectId = res.data.projectId
+      store.projectId = savedProjectId
+      store.projectTitle = projectTitle
+      store.projectSaved = true
+      store.projectStatus = 'saved'
+      await router.replace({
+        name: 'studio',
+        query: {
+          ...route.query,
+          projectId: savedProjectId,
+          industry: store.industry,
+        },
+      })
+      toast.success(`项目已保存 (ID: ${savedProjectId})`)
+    }
   } catch (e) {
-    toast.error('保存失败：' + (e.message || '网络错误'))
+    store.projectStatus = 'error'
+    store.saveError = e.detail || e.message || '网络错误'
+    toast.error('保存失败：' + (e.detail || e.message || '网络错误'))
+  } finally {
+    saving.value = false
   }
 }
 
@@ -99,7 +142,28 @@ const handleEdit = () => {
   })
 }
 
-const handleRegenerate = async () => {
+const handleRegenerate = async (event) => {
+  event?.preventDefault()
+  if (store.generating) return
+
+  // 重新生成属于当前工作台操作，不能因为结果页状态丢失而回到首页。
+  if (route.name !== 'studio') {
+    await router.replace({
+      name: 'studio',
+      query: {
+        ...route.query,
+        industry: store.industry === 'food' ? 'food' : store.industry === 'electronics' ? 'electronics' : 'jewelry',
+        regenerate: '1',
+      },
+    })
+  }
+  store.frontPosterUrl = null
+  store.backPosterUrl = null
+  store.carStickerUrl = null
+  store.backBgImageUrl = null
+  store.enhancedFrontUrl = null
+  store.enhancedBackUrl = null
+  store.currentStep = 3
   if (store.materialType === 'car-sticker') await store.generateCarSticker()
   else await store.generatePosters()
 }
@@ -115,158 +179,155 @@ const openEnhance = (target) => {
 
 <template>
   <div v-if="store" class="preview">
-    <!-- Hero section -->
-    <div class="md3-card md3-card--filled result-hero">
-      <span class="md3-badge md3-badge--tonal">AI 生成完成</span>
-      <h1 class="result-title">你的海报已就绪</h1>
-      <p class="result-sub">点击图片可放大查看，确认无误后保存或下载</p>
-      <div class="hero-actions">
-        <button class="md3-btn md3-btn--filled" @click="handleSaveProject">
-          保存项目
-        </button>
-        <button class="md3-btn md3-btn--tonal" :disabled="store.generating" @click="handleRegenerate">
-          <span v-if="store.generating" class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
-          <span v-else>重新生成</span>
-        </button>
-        <button class="md3-btn md3-btn--outlined" @click="handleEdit">
-          修改
-        </button>
-        <button class="md3-btn md3-btn--text" @click="handleRestart">
-          重新开始
-        </button>
+    <header class="pv-hero">
+      <span class="ed-tag">AI 生成完成</span>
+      <h1 class="pv-hero__title">你的海报已就绪</h1>
+      <p class="pv-hero__sub ed-meta">点击图片可放大查看，确认无误后保存或下载</p>
+      <div class="pv-hero__actions">
+        <EdButton variant="solid" :loading="saving" :disabled="saving" @click="handleSaveProject">保存项目</EdButton>
+        <EdButton variant="outline" :loading="store.generating" @click="handleRegenerate">重新生成</EdButton>
+        <EdButton variant="outline" @click="handleEdit">修改</EdButton>
+        <EdButton variant="text" @click="handleRestart">重新开始</EdButton>
       </div>
-    </div>
+    </header>
 
-    <!-- Car sticker -->
-    <div v-if="hasCarSticker" class="poster-row">
-      <div class="md3-card md3-card--elevated poster-card poster-card--wide">
-        <div class="poster-head">
-          <span class="poster-label">车贴</span>
-          <button class="md3-btn md3-btn--filled md3-btn--small" @click="handleDownload(store.carStickerUrl, '车贴')">
-            下载
-          </button>
-        </div>
-        <div class="poster-img-wrap" @click="openLightbox(store.carStickerUrl)">
-          <img :src="store.carStickerUrl" alt="车贴" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Poster front/back -->
-    <div v-if="isPoster" class="poster-row">
-      <!-- Front -->
-      <div v-if="hasFront" class="md3-card md3-card--elevated poster-card">
-        <div class="poster-head">
-          <span class="poster-label">
-            正面
-            <span v-if="hasEnhancedFront && !showOriginalFront" class="enhanced-badge">已优化</span>
+    <div v-if="hasCarSticker" class="plates">
+      <section class="plate">
+        <img
+          class="plate__img"
+          :src="store.carStickerUrl"
+          alt="车贴"
+          @click="openLightbox(store.carStickerUrl)"
+        >
+        <div class="plate__cap">
+          <span class="plate__no ed-num">图版 01</span>
+          <span class="plate__name ed-meta">车贴.png</span>
+          <span class="plate__ops">
+            <EdButton
+              variant="text" size="sm"
+              :loading="downloading.has('车贴')"
+              @click="handleDownload(store.carStickerUrl, '车贴')"
+            ><EdIcon name="download" :size="13" />下载</EdButton>
+            <EdButton variant="text" size="sm" @click="openLightbox(store.carStickerUrl)">
+              <EdIcon name="zoom-in" :size="13" />放大
+            </EdButton>
           </span>
-          <div class="poster-actions">
-            <button v-if="hasEnhancedFront" class="md3-btn md3-btn--text md3-btn--small" @click="showOriginalFront = !showOriginalFront">
+        </div>
+      </section>
+    </div>
+
+    <div v-if="isPoster" class="plates plates--pair">
+      <section v-if="hasFront" class="plate">
+        <img
+          class="plate__img"
+          :src="displayFrontUrl"
+          alt="正面海报"
+          @click="openLightbox(displayFrontUrl)"
+        >
+        <div class="plate__cap">
+          <span class="plate__no ed-num">图版 01</span>
+          <span class="plate__name ed-meta">海报_正面.png</span>
+          <span v-if="hasEnhancedFront && !showOriginalFront" class="ed-tag plate__tag">已优化</span>
+          <span class="plate__ops">
+            <EdButton v-if="hasEnhancedFront" variant="text" size="sm" @click="showOriginalFront = !showOriginalFront">
               {{ showOriginalFront ? '看优化版' : '看原图' }}
-            </button>
-            <button v-if="hasEnhancedFront" class="md3-btn md3-btn--text md3-btn--small" style="color: var(--md-error)" @click="store.revertEnhancement('front')">
+            </EdButton>
+            <EdButton v-if="hasEnhancedFront" variant="text" size="sm" class="plate__danger" @click="store.revertEnhancement('front')">
               撤销
-            </button>
-            <button class="md3-btn md3-btn--text md3-btn--small" :disabled="store.enhancing" @click="openEnhance('front')">
-              AI 优化
-            </button>
-            <button class="md3-icon-btn md3-icon-btn--outlined" @click="handleDownload(displayFrontUrl, '海报_正面')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            </button>
-          </div>
-        </div>
-        <div class="poster-img-wrap" @click="openLightbox(displayFrontUrl)">
-          <img :src="displayFrontUrl" alt="正面海报" />
-        </div>
-      </div>
-
-      <!-- Back -->
-      <div v-if="hasBack" class="md3-card md3-card--elevated poster-card">
-        <div class="poster-head">
-          <span class="poster-label">
-            反面
-            <span v-if="hasEnhancedBack && !showOriginalBack" class="enhanced-badge">已优化</span>
+            </EdButton>
+            <EdButton variant="text" size="sm" :disabled="store.enhancing" @click="openEnhance('front')">
+              <EdIcon name="sparkle" :size="13" />优化
+            </EdButton>
+            <EdButton variant="text" size="sm" @click="openLightbox(displayFrontUrl)">
+              <EdIcon name="zoom-in" :size="13" />放大
+            </EdButton>
+            <EdButton
+              variant="text" size="sm"
+              :loading="downloading.has('海报_正面')"
+              @click="handleDownload(displayFrontUrl, '海报_正面')"
+            ><EdIcon name="download" :size="13" />下载</EdButton>
           </span>
-          <div class="poster-actions">
-            <button v-if="hasEnhancedBack" class="md3-btn md3-btn--text md3-btn--small" @click="showOriginalBack = !showOriginalBack">
+        </div>
+      </section>
+
+      <section v-if="hasBack" class="plate">
+        <img
+          class="plate__img"
+          :src="displayBackUrl"
+          alt="反面海报"
+          @click="openLightbox(displayBackUrl)"
+        >
+        <div class="plate__cap">
+          <span class="plate__no ed-num">图版 02</span>
+          <span class="plate__name ed-meta">海报_反面.png</span>
+          <span v-if="hasEnhancedBack && !showOriginalBack" class="ed-tag plate__tag">已优化</span>
+          <span class="plate__ops">
+            <EdButton v-if="hasEnhancedBack" variant="text" size="sm" @click="showOriginalBack = !showOriginalBack">
               {{ showOriginalBack ? '看优化版' : '看原图' }}
-            </button>
-            <button v-if="hasEnhancedBack" class="md3-btn md3-btn--text md3-btn--small" style="color: var(--md-error)" @click="store.revertEnhancement('back')">
+            </EdButton>
+            <EdButton v-if="hasEnhancedBack" variant="text" size="sm" class="plate__danger" @click="store.revertEnhancement('back')">
               撤销
-            </button>
-            <button class="md3-btn md3-btn--text md3-btn--small" :disabled="store.enhancing" @click="openEnhance('back')">
-              AI 优化
-            </button>
-            <button class="md3-icon-btn md3-icon-btn--outlined" @click="handleDownload(displayBackUrl, '海报_反面')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            </button>
-          </div>
+            </EdButton>
+            <EdButton variant="text" size="sm" :disabled="store.enhancing" @click="openEnhance('back')">
+              <EdIcon name="sparkle" :size="13" />优化
+            </EdButton>
+            <EdButton variant="text" size="sm" @click="openLightbox(displayBackUrl)">
+              <EdIcon name="zoom-in" :size="13" />放大
+            </EdButton>
+            <EdButton
+              variant="text" size="sm"
+              :loading="downloading.has('海报_反面')"
+              @click="handleDownload(displayBackUrl, '海报_反面')"
+            ><EdIcon name="download" :size="13" />下载</EdButton>
+          </span>
         </div>
-        <div class="poster-img-wrap" @click="openLightbox(displayBackUrl)">
-          <img :src="displayBackUrl" alt="反面海报" />
-        </div>
-      </div>
+      </section>
     </div>
 
-    <!-- Enhancing indicator -->
-    <div v-if="store.enhancing" class="md3-card md3-card--outlined enhancing-bar">
-      <span class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
+    <div v-if="store.enhancing" class="note pv__note">
+      <EdIcon name="sparkle" :size="13" class="pv__note-icon" />
       <span>AI 正在优化海报...</span>
     </div>
 
-    <!-- Summary card -->
-    <div class="md3-card md3-card--filled summary-card">
-      <div class="summary-header">{{ isPoster ? '海报信息' : '车贴信息' }}</div>
-      <div class="summary-grid">
-        <div class="summary-item">
-          <span class="summary-label">品牌</span>
-          <span class="summary-value">{{ brandName }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">节日</span>
-          <span class="summary-value">{{ festivalName }}</span>
-        </div>
+    <section class="pv-summary">
+      <h3 class="pv-summary__head ed-label">{{ isPoster ? '海报信息' : '车贴信息' }}</h3>
+      <dl class="summary">
+        <dt class="ed-meta">品牌</dt>
+        <dd>{{ brandName }}</dd>
+        <dt class="ed-meta">节日</dt>
+        <dd>{{ festivalName }}</dd>
         <template v-if="isPoster">
-          <div class="summary-item">
-            <span class="summary-label">主爆点</span>
-            <span class="summary-value">{{ store.mainPromotion.content }}</span>
-          </div>
-          <div v-if="store.secondaryPromotion.content" class="summary-item">
-            <span class="summary-label">次爆点</span>
-            <span class="summary-value">{{ store.secondaryPromotion.content }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">活动数</span>
-            <span class="summary-value">{{ store.activities.length }} 个</span>
-          </div>
+          <dt class="ed-meta">主爆点</dt>
+          <dd>{{ store.mainPromotion.content }}</dd>
+          <template v-if="store.secondaryPromotion.content">
+            <dt class="ed-meta">次爆点</dt>
+            <dd>{{ store.secondaryPromotion.content }}</dd>
+          </template>
+          <dt class="ed-meta">活动数</dt>
+          <dd>{{ store.activities.length }} 个</dd>
         </template>
         <template v-else>
-          <div class="summary-item">
-            <span class="summary-label">尺寸</span>
-            <span class="summary-value">{{ store.carStickerSize.width }} x {{ store.carStickerSize.height }}</span>
-          </div>
-          <div v-if="store.carStickerText" class="summary-item">
-            <span class="summary-label">文案</span>
-            <span class="summary-value">{{ store.carStickerText }}</span>
-          </div>
+          <dt class="ed-meta">尺寸</dt>
+          <dd>{{ store.carStickerSize.width }} × {{ store.carStickerSize.height }}</dd>
+          <template v-if="store.carStickerText">
+            <dt class="ed-meta">文案</dt>
+            <dd>{{ store.carStickerText }}</dd>
+          </template>
         </template>
-      </div>
-    </div>
+      </dl>
+    </section>
 
-    <!-- Lightbox -->
     <Teleport to="body">
-      <Transition name="lightbox-fade">
-        <div v-if="lightboxUrl" class="lightbox-overlay" @click.self="closeLightbox">
-          <button class="lightbox-close" @click="closeLightbox">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      <Transition name="pv-lb">
+        <div v-if="lightboxUrl" class="lightbox" @click.self="closeLightbox">
+          <button class="lightbox__close" @click="closeLightbox" aria-label="关闭">
+            <EdIcon name="close" :size="20" />
           </button>
-          <img :src="lightboxUrl" class="lightbox-img" alt="预览" />
+          <img :src="lightboxUrl" class="lightbox__img" alt="预览" />
         </div>
       </Transition>
     </Teleport>
 
-    <!-- Enhance dialog -->
     <EnhancePanel
       v-if="showEnhance"
       :target="enhanceTarget"
@@ -274,230 +335,112 @@ const openEnhance = (target) => {
       @update:show="showEnhance = $event"
     />
   </div>
-  <div v-else class="preview" style="padding: 40px; text-align: center; color: var(--md-on-surface-variant);">
-    加载中...
-  </div>
+  <div v-else class="preview pv-loading ed-meta">加载中...</div>
 </template>
 
 <style scoped>
 .preview {
-  animation: fadeUp 0.4s ease;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ed-space-7);
 }
 
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Hero */
-.result-hero {
-  margin-bottom: 28px;
-  border-radius: var(--md-shape-extra-large);
-  padding: 28px 32px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--md-primary) 8%, var(--md-surface)) 0%, var(--md-surface) 100%);
-}
-
-.result-title {
-  font-size: 28px;
+.pv-hero__title {
+  margin: var(--ed-space-3) 0 var(--ed-space-2);
+  font-family: var(--ed-serif);
+  font-size: 26px;
   font-weight: 700;
-  color: var(--md-on-surface);
-  letter-spacing: -0.5px;
-  margin: 12px 0 4px;
+  color: var(--ed-ink);
 }
-
-.result-sub {
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface-variant);
-  margin: 0 0 20px;
-}
-
-.hero-actions {
+.pv-hero__sub { text-transform: none; }
+.pv-hero__actions {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: var(--ed-space-2);
+  margin-top: var(--ed-space-5);
 }
 
-/* Poster cards */
-.poster-row {
-  display: flex;
-  gap: 20px;
-  justify-content: center;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin-bottom: 28px;
-}
+.plates { display: flex; flex-direction: column; gap: var(--ed-space-7); }
 
-.poster-card {
-  flex: 1;
-  min-width: 340px;
-  max-width: 540px;
-  border-radius: var(--md-shape-large);
-  overflow: hidden;
-}
+.plate { display: block; }
 
-.poster-card--wide {
-  max-width: 800px;
-  flex: 1 1 100%;
-}
-
-.poster-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.poster-label {
-  font-size: var(--md-title-small);
-  font-weight: 600;
-  color: var(--md-on-surface);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.enhanced-badge {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--md-on-primary);
-  background: var(--md-primary);
-  padding: 2px 8px;
-  border-radius: 10px;
-}
-
-.poster-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.poster-img-wrap {
-  background: var(--md-surface-container-low);
-  position: relative;
+.plate__img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--ed-rule);
+  background: var(--ed-paper-deep);
   cursor: zoom-in;
 }
 
-.poster-img-wrap img {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-/* Enhancing bar */
-.enhancing-bar {
+.plate__cap {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 14px 20px;
-  margin-bottom: 24px;
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface);
+  gap: var(--ed-space-3);
+  padding-top: var(--ed-space-3);
+  border-top: 1px solid var(--ed-rule);
+  margin-top: var(--ed-space-3);
 }
-
-/* Summary */
-.summary-card {
-  padding: 20px;
-  border-radius: var(--md-shape-large);
+.plate__no { flex-shrink: 0; }
+.plate__name {
+  flex: 1 1 120px;
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: .02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.plate__tag { flex-shrink: 0; }
+.plate__ops { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ed-space-1); flex-shrink: 0; }
+.plate__danger { color: var(--ed-danger); }
 
-.summary-header {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--md-on-surface-variant);
-  margin-bottom: 16px;
-}
+.pv__note { gap: var(--ed-space-2); }
+.pv__note-icon { flex-shrink: 0; }
 
-.summary-grid {
+.pv-summary__head { margin-bottom: var(--ed-space-4); }
+.summary {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: 120px 1fr;
+  gap: var(--ed-space-2) var(--ed-space-4);
+  margin: 0;
 }
+.summary dd { margin: 0; font-family: var(--ed-serif); font-size: 14px; color: var(--ed-ink); }
 
-.summary-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.summary-label {
-  font-size: var(--md-label-small);
-  color: var(--md-on-surface-variant);
-  font-weight: 500;
-}
-
-.summary-value {
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface);
-}
-
-/* Lightbox */
-.lightbox-overlay {
+.lightbox {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  z-index: 1500;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 40px;
+  padding: var(--ed-space-5);
+  background: rgba(22, 21, 15, .88);
 }
-
-.lightbox-close {
+.lightbox__img { max-width: 100%; max-height: 88vh; border: 1px solid var(--ed-paper); }
+.lightbox__close {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  cursor: pointer;
+  top: var(--ed-space-5);
+  right: var(--ed-space-5);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--md-duration-short4) var(--md-easing-standard);
+  border: 0;
+  background: transparent;
+  color: var(--ed-paper);
+  cursor: pointer;
 }
 
-.lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
+.pv-lb-enter-active { transition: opacity var(--ed-fast) var(--ed-ease); }
+.pv-lb-leave-active { transition: opacity var(--ed-fast) var(--ed-ease); }
+.pv-lb-enter-from,
+.pv-lb-leave-to { opacity: 0; }
 
-.lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: var(--md-shape-medium);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
+.pv-loading { position: relative; min-height: 86px; padding: 56px var(--ed-space-7) var(--ed-space-4); text-align: center; text-transform: none; color: var(--ed-ink-faint); }
+.pv-loading::before { content: ''; position: absolute; top: 22px; left: 50%; width: 22px; height: 22px; border: 2px solid color-mix(in srgb, var(--ed-accent) 22%, var(--ed-rule)); border-right-color: var(--ed-accent); border-radius: 50%; transform: translateX(-50%); animation: pv-loading-spin .85s linear infinite; }
+.pv-loading::after { content: ''; position: absolute; top: 32px; left: calc(50% + 1px); width: 5px; height: 5px; border-radius: 50%; background: var(--ed-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ed-accent) 15%, transparent); animation: pv-loading-pulse 1.1s ease-in-out infinite; }
+@keyframes pv-loading-spin { to { transform: translateX(-50%) rotate(360deg); } }
+@keyframes pv-loading-pulse { 50% { opacity: .35; transform: scale(.7); } }
 
-.lightbox-fade-enter-active {
-  transition: all var(--md-duration-medium2) var(--md-easing-standard);
-}
-
-.lightbox-fade-leave-active {
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.lightbox-fade-enter-from,
-.lightbox-fade-leave-to {
-  opacity: 0;
-}
-
-@media (max-width: 768px) {
-  .poster-card {
-    min-width: 100%;
-  }
-
-  .result-title {
-    font-size: 22px;
-  }
-
-  .summary-grid {
-    grid-template-columns: 1fr;
-  }
+@media (min-width: 1000px) {
+  .plates--pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ed-space-6); align-items: start; }
 }
 </style>

@@ -1,6 +1,9 @@
 <script setup>
-import { ref, computed, toRef } from 'vue'
+import { ref, computed } from 'vue'
 import { usePosterStore } from '../store/poster'
+import EdDialog from './common/EdDialog.vue'
+import EdButton from './common/EdButton.vue'
+import EdIcon from './common/EdIcon.vue'
 
 const props = defineProps({
   target: { type: String, default: 'back' },
@@ -9,9 +12,6 @@ const props = defineProps({
 const emit = defineEmits(['update:show', 'enhanced'])
 
 const store = usePosterStore()
-const enhancing = toRef(store, 'enhancing')
-const enhanceError = toRef(store, 'enhanceError')
-
 const selectedType = ref('overall')
 
 const options = [
@@ -37,112 +37,98 @@ const handleRevert = () => {
   store.revertEnhancement(props.target)
 }
 
+const handleRegenerate = async () => {
+  store.enhanceError = null
+  emit('update:show', false)
+  await store.generatePosters()
+}
+
 const close = () => {
   emit('update:show', false)
 }
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="show" class="md3-dialog-overlay" @click.self="close">
-        <div class="md3-dialog enhance-dialog">
-          <h2 class="md3-dialog__title">AI 智能优化</h2>
+  <EdDialog v-if="show" title="优化海报" :width="520" @close="close">
+    <div class="note note--accent">
+      <EdIcon name="sparkle" :size="13" class="note__icon" />
+      <span v-if="!isBack">正面海报优化后建议检查文字是否正确</span>
+      <span v-else>反面海报仅优化背景，文字不受影响</span>
+    </div>
 
-          <div class="md3-dialog__content">
-            <div :class="['md3-alert', isBack ? 'md3-alert--info' : 'md3-alert--warning']">
-              <span v-if="!isBack">正面海报优化后建议检查文字是否正确</span>
-              <span v-else>反面海报仅优化背景，文字不受影响</span>
-            </div>
+    <div class="opt-list">
+      <button
+        v-for="opt in options"
+        :key="opt.key"
+        type="button"
+        :class="['opt-row', { 'is-selected': selectedType === opt.key }]"
+        @click="selectedType = opt.key"
+      >
+        <span :class="['opt-box', { 'is-checked': selectedType === opt.key }]">
+          <EdIcon v-if="selectedType === opt.key" name="check" :size="11" />
+        </span>
+        <span class="opt-text">
+          <span class="opt-title">{{ opt.label }}</span>
+          <span class="opt-desc ed-meta">{{ opt.desc }}</span>
+        </span>
+      </button>
+    </div>
 
-            <div class="options-list">
-              <label
-                v-for="opt in options"
-                :key="opt.key"
-                :class="['md3-radio', { 'md3-radio--selected': selectedType === opt.key }]"
-                @click="selectedType = opt.key"
-              >
-                <span class="md3-radio__circle">
-                  <span v-if="selectedType === opt.key" class="radio-dot"></span>
-                </span>
-                <span class="md3-radio__label">
-                  <span class="radio-title">{{ opt.label }}</span>
-                  <span class="radio-desc">{{ opt.desc }}</span>
-                </span>
-              </label>
-            </div>
+    <div v-if="store.enhanceError" class="note note--danger ep__error">
+      <EdIcon name="warning" :size="13" class="note__icon" />
+      <span>{{ store.enhanceError }}</span>
+      <EdButton variant="text" @click="handleRegenerate">重新生成海报</EdButton>
+    </div>
 
-            <div v-if="enhanceError" class="md3-alert md3-alert--error" style="margin-top: 12px">
-              {{ enhanceError }}
-            </div>
-          </div>
-
-          <div class="md3-dialog__actions">
-            <button v-if="hasEnhanced" class="md3-btn md3-btn--text" style="color: var(--md-error)" @click="handleRevert">
-              撤销优化
-            </button>
-            <div style="flex: 1"></div>
-            <button class="md3-btn md3-btn--text" @click="close">取消</button>
-            <button class="md3-btn md3-btn--filled" :disabled="enhancing" @click="handleEnhance">
-              <span v-if="enhancing" class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
-              <span v-else>应用优化</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    <template #footer>
+      <EdButton v-if="hasEnhanced" variant="text" class="ep__revert" @click="handleRevert">撤销优化</EdButton>
+      <span class="ep__spacer" />
+      <EdButton variant="text" @click="close">取消</EdButton>
+      <EdButton variant="solid" :loading="store.enhancing" @click="handleEnhance">应用优化</EdButton>
+    </template>
+  </EdDialog>
 </template>
 
 <style scoped>
-.enhance-dialog {
-  max-width: 480px;
-}
+.note--accent { border-left-color: var(--ed-accent); background: var(--ed-accent-tint); }
+.note--danger { border-left-color: var(--ed-danger); background: var(--ed-danger-tint); }
+.note__icon { flex-shrink: 0; margin-top: 2px; }
 
-.options-list {
+.opt-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
+  margin-top: var(--ed-space-5);
 }
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ed-space-3);
+  padding: var(--ed-space-3) 0;
+  border: 0;
+  border-bottom: 1px solid var(--ed-rule);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.opt-row:hover { border-bottom-color: var(--ed-ink-faint); }
 
-.radio-title {
-  display: block;
-  font-size: var(--md-body-medium);
-  font-weight: 600;
-  color: var(--md-on-surface);
+.opt-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ed-ink);
+  color: var(--ed-paper);
+  flex-shrink: 0;
 }
+.opt-box.is-checked { background: var(--ed-ink); }
 
-.radio-desc {
-  display: block;
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-  margin-top: 2px;
-}
+.opt-text { display: flex; flex-direction: column; gap: 2px; }
+.opt-title { font-family: var(--ed-serif); font-size: 15px; color: var(--ed-ink); }
+.opt-desc { text-transform: none; letter-spacing: .02em; }
 
-.radio-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--md-primary);
-  display: block;
-}
-
-/* Transition */
-.modal-fade-enter-active {
-  transition: all var(--md-duration-medium2) var(--md-easing-standard);
-}
-
-.modal-fade-leave-active {
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
-
-.modal-fade-enter-from .md3-dialog {
-  transform: translateY(16px) scale(0.95);
-}
+.ep__error { margin-top: var(--ed-space-4); }
+.ep__revert { color: var(--ed-danger); }
+.ep__spacer { flex: 1; }
 </style>

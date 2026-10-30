@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '../api'
+import { getIndustryTemplate } from '../data/industryTemplates'
 
 export const usePosterStore = defineStore('poster', {
   persist: {
@@ -16,6 +17,33 @@ export const usePosterStore = defineStore('poster', {
     carStickerText: '',
 
     // ====== 步骤1: 节日与品牌 ======
+    industry: 'jewelry',
+    customBrandName: '',
+    electronicsCampaign: {
+      productName: '',
+      productDescription: '',
+      sellingPoints: '',
+      promotionType: '新品直降',
+      promotionValue: '',
+      features: '',
+      service: '全国联保',
+    },
+    foodCampaign: {
+      mode: 'signature',
+      dishName: '',
+      dishDescription: '',
+      sellingPoints: '',
+      dishImageUrl: '',
+      serviceMode: '堂食',
+      originalPrice: '',
+      promoPrice: '',
+      setContents: '',
+      audience: '朋友聚餐',
+      eventType: '门店限时优惠',
+      eventRule: '',
+      gift: '',
+      actionText: '到店尝鲜',
+    },
     festival: null,
     brand: null,
     startDate: '',
@@ -66,6 +94,11 @@ export const usePosterStore = defineStore('poster', {
       phone: '',
     },
     selectedMerchantTemplateId: null,
+    projectId: null,
+    projectTitle: '',
+    projectSaved: false,
+    projectStatus: 'draft',
+    saveError: null,
 
     discountTypes: [],
     merchantTemplates: [],
@@ -86,19 +119,54 @@ export const usePosterStore = defineStore('poster', {
   }),
 
   getters: {
-    canStep1Next: (s) => s.festival && s.brand,
-    canStep2Next: (s) => s.mainPromotion.mainTitle.trim().length > 0,
-    canStep3Next: (s) => s.activities.length > 0 && s.merchantInfo.name.trim().length > 0,
+    suggestedProjectTitle: (s) => {
+      if (s.projectTitle) return s.projectTitle
+      const brand = s.industry === 'jewelry'
+        ? s.brands?.find(item => item.id === s.brand)?.name || ''
+        : s.customBrandName || ''
+      if (s.industry === 'food') return [s.merchantInfo.name, s.foodCampaign.dishName || s.foodCampaign.setContents || s.foodCampaign.eventType].filter(Boolean).join(' · ') || '餐饮海报项目'
+      if (s.industry === 'electronics') return [s.merchantInfo.name, s.electronicsCampaign.productName].filter(Boolean).join(' · ') || '数码海报项目'
+      return [brand, s.festival && s.festivals?.find(f => f.id === s.festival)?.name, s.theme || s.mainPromotion.mainTitle].filter(Boolean).join(' · ') || '珠宝海报项目'
+    },
+    canStep1Next: (s) => s.industry === 'jewelry'
+      ? Boolean(s.festival && s.brand)
+      : s.customBrandName.trim().length > 0,
+    industryTemplate: (s) => getIndustryTemplate(s.industry),
+    displayBrandName: (s) => s.industry === 'jewelry'
+      ? (s.brands?.find(b => b.id === s.brand)?.name || '')
+      : s.customBrandName.trim(),
+    canStep2Next: (s) => s.industry === 'food'
+      ? s.foodCampaign.dishName.trim().length > 0
+      : s.industry === 'electronics'
+        ? s.electronicsCampaign.productName.trim().length > 0
+        : s.mainPromotion.mainTitle.trim().length > 0,
+    canStep3Next: (s) => s.industry === 'food'
+      ? s.merchantInfo.name.trim().length > 0 && (s.foodCampaign.mode !== 'signature' || s.foodCampaign.dishName.trim().length > 0)
+      : s.industry === 'electronics'
+        ? s.merchantInfo.name.trim().length > 0 && s.electronicsCampaign.productName.trim().length > 0
+        : s.activities.length > 0 && s.merchantInfo.name.trim().length > 0,
 
     colorScheme: (s) => {
-      if (!s.festival) return null
+      if (!s.festival) return s.industry === 'food' ? '餐饮暖食欲' : s.industry === 'electronics' ? '数码科技蓝' : null
       const f = s.festivals?.find(f => f.id === s.festival)
-      return f ? f.colorScheme : null
+      return f ? f.colorScheme : (s.industry === 'food' ? '餐饮暖食欲' : null)
     },
     festivalColors: (s) => {
-      if (!s.festival) return null
+      if (!s.festival) {
+        return s.industry === 'food'
+          ? { primary: '#C75C3C', secondary: '#F2A65A', bg: '#FFF5EB' }
+          : s.industry === 'electronics'
+            ? { primary: '#1769E0', secondary: '#42D4FF', bg: '#F2F7FF' }
+            : null
+      }
       const f = s.festivals?.find(f => f.id === s.festival)
-      return f ? { primary: f.primaryColor, secondary: f.secondaryColor, bg: f.bgColor } : null
+      return f
+        ? { primary: f.primaryColor, secondary: f.secondaryColor, bg: f.bgColor }
+        : (s.industry === 'food'
+          ? { primary: '#C75C3C', secondary: '#F2A65A', bg: '#FFF5EB' }
+          : s.industry === 'electronics'
+            ? { primary: '#1769E0', secondary: '#42D4FF', bg: '#F2F7FF' }
+            : null)
     },
   },
 
@@ -157,15 +225,67 @@ export const usePosterStore = defineStore('poster', {
       this.enhancedFrontUrl = null
       this.enhancedBackUrl = null
       this._abortController = new AbortController()
-      const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
+      const brandName = this.displayBrandName || this.brand
+      const selectedBrandName = this.industry === 'jewelry' ? brandName : this.customBrandName.trim()
+
+      // 餐饮不使用珠宝节日模板；兼容旧项目中误保存的春节 festival。
+      if (this.industry === 'food') this.festival = null
+
+      if (this.industry === 'food') {
+        const food = this.foodCampaign
+        const offer = food.mode === 'combo'
+          ? `${food.setContents || food.dishName}${food.promoPrice ? ` ${food.promoPrice}元` : ''}`
+          : food.mode === 'store-event'
+            ? `${food.eventType}${food.eventRule ? `：${food.eventRule}` : ''}`
+            : `${food.dishName}${food.promoPrice ? ` ${food.promoPrice}元` : ''}`
+        this.theme = food.mode === 'combo' ? (food.setContents || '人气套餐') : food.mode === 'store-event' ? (food.eventType || '门店活动') : (food.dishName || '招牌美食')
+        this.subtitle = food.sellingPoints || food.dishDescription || offer
+        this.mainPromotion.mainTitle = offer
+        this.mainPromotion.subTitle = food.actionText || food.serviceMode || '到店尝鲜'
+        this.syncMainContent()
+        this.activities = [{
+          id: `food_${Date.now()}`,
+          type: 'food-offer',
+          discountType: food.mode,
+          discountDetail: offer,
+          content: food.eventRule || food.dishDescription || food.setContents || food.sellingPoints,
+          highlight: food.promoPrice || food.gift || food.actionText,
+          imageUrls: food.dishImageUrl ? [food.dishImageUrl] : [],
+          fieldValues: { ...food },
+        }]
+      }
+
+      if (this.industry === 'electronics') {
+        const electronics = this.electronicsCampaign
+        const offer = `${electronics.promotionType}${electronics.promotionValue ? ` ${electronics.promotionValue}` : ''}`
+        this.festival = null
+        this.theme = electronics.productName || '新品焕新季'
+        this.subtitle = electronics.sellingPoints || electronics.productDescription || offer
+        this.mainPromotion.mainTitle = offer
+        this.mainPromotion.subTitle = electronics.features || electronics.service || '立即了解'
+        this.syncMainContent()
+        this.activities = [{
+          id: `electronics_${Date.now()}`,
+          type: 'electronics-offer',
+          discountType: electronics.promotionType,
+          discountDetail: offer,
+          content: electronics.productDescription || electronics.sellingPoints,
+          highlight: electronics.promotionValue || electronics.features,
+          imageUrls: [],
+          fieldValues: { ...electronics },
+        }]
+      }
 
       try {
         const colors = this.festivalColors || {}
         const signal = this._abortController.signal
 
         const frontData = {
-          brand: brandName,
-          brandId: this.brand,
+          brand: selectedBrandName,
+          brandId: this.industry === 'jewelry' ? this.brand : '',
+          industry: this.industry,
+          industryName: this.industryTemplate.name,
+          industryStyle: this.industryTemplate.visualStyle,
           theme: this.theme,
           subtitle: this.subtitle,
           startDate: this.startDate,
@@ -181,10 +301,14 @@ export const usePosterStore = defineStore('poster', {
           secondaryColor: colors.secondary || '',
           bgColor: colors.bg || '',
           festivalId: this.festival || '',
+          foodCampaign: this.industry === 'food' ? { ...this.foodCampaign } : undefined,
         }
 
         const backData = {
-          brand: brandName,
+          brand: selectedBrandName,
+          industry: this.industry,
+          industryName: this.industryTemplate.name,
+          industryStyle: this.industryTemplate.visualStyle,
           activities: this.activities,
           merchantInfo: this.merchantInfo,
           colorScheme: this.colorScheme || '默认',
@@ -192,6 +316,7 @@ export const usePosterStore = defineStore('poster', {
           secondaryColor: colors.secondary || '',
           bgColor: colors.bg || '',
           festivalId: this.festival || '',
+          foodCampaign: this.industry === 'food' ? { ...this.foodCampaign } : undefined,
         }
 
         const [frontRes, backRes] = await Promise.all([
@@ -226,7 +351,7 @@ export const usePosterStore = defineStore('poster', {
     async generateCarSticker() {
       this.generating = true
       this.generateError = null
-      const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
+      const brandName = this.displayBrandName || this.brand
 
       try {
         const colors = this.festivalColors || {}
@@ -253,18 +378,21 @@ export const usePosterStore = defineStore('poster', {
       }
     },
 
-    // 修复：保留静态数据，只重置用户输入
+    // 保留静态数据与当前行业，只重置用户输入
     resetAll() {
       const keep = {
         festivals: this.festivals,
         brands: this.brands,
         discountTypes: this.discountTypes,
         merchantTemplates: this.merchantTemplates,
+        industry: this.industry,
       }
       this.$reset()
       Object.assign(this, keep)
       this.currentStep = 1
       this.materialType = 'poster'
+      this.projectStatus = 'draft'
+      this.saveError = null
     },
 
     addActivity(activity) {
@@ -300,18 +428,30 @@ export const usePosterStore = defineStore('poster', {
       this.enhanceError = null
 
       try {
-        const brandName = (this.brands?.find(b => b.id === this.brand)?.name) || this.brand
+        const brandName = this.displayBrandName || this.brand
         const colors = this.festivalColors || {}
 
         const isBack = target === 'back'
+        const sourceUrl = isBack ? this.backPosterUrl : this.frontPosterUrl
+        if (!sourceUrl) {
+          throw new Error('当前海报源图已失效，请先重新生成海报后再优化')
+        }
+        if (/^https?:\/\//i.test(sourceUrl) || sourceUrl.startsWith('/uploads/')) {
+          const probeUrl = sourceUrl.startsWith('/') ? `${window.location.origin}${sourceUrl}` : sourceUrl
+          const probe = await fetch(probeUrl, { method: 'HEAD' })
+          if (!probe.ok) throw new Error('当前海报源图已失效，请先重新生成海报后再优化')
+        }
         const payload = {
-          imageUrl: isBack ? this.backPosterUrl : this.frontPosterUrl,
+          imageUrl: sourceUrl,
           posterType: target,
           bgImageUrl: this.backBgImageUrl,
           type,
           activities: this.activities,
           merchantInfo: this.merchantInfo,
           brand: brandName,
+          industry: this.industry,
+          industryName: this.industryTemplate.name,
+          industryStyle: this.industryTemplate.visualStyle,
           primaryColor: colors.primary || '',
           secondaryColor: colors.secondary || '',
           bgColor: colors.bg || '',

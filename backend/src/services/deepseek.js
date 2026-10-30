@@ -32,10 +32,18 @@ class DeepSeekService {
     };
 
     console.log('[DeepSeek-Chat] 请求:', JSON.stringify({ url, model: this.model, messageCount: messages.length }));
-    const res = await axios.post(url, body, { headers: this.getHeaders(), timeout: 120000 });
-    console.log('[DeepSeek-Chat] 响应成功');
-
-    return res.data;
+    try {
+      const res = await axios.post(url, body, { headers: this.getHeaders(), timeout: 120000 });
+      console.log('[DeepSeek-Chat] 响应成功');
+      return res.data;
+    } catch (err) {
+      const status = err.response?.status || 'network';
+      const detail = err.response?.data
+        ? JSON.stringify(err.response.data)
+        : (err.code || err.message || 'unknown error');
+      console.error(`[DeepSeek-Chat] 请求失败 status=${status} detail=${detail}`);
+      throw err;
+    }
   }
 }
 

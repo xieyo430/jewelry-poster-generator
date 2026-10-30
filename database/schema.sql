@@ -1,6 +1,6 @@
 -- ============================================================
 -- haibao 海报生成器数据库建表脚本
--- MySQL 8.0+
+-- MySQL 5.7.8+（原生 JSON 类型；MySQL 8.0 亦可）
 -- 执行顺序: schema.sql → seed.sql
 -- ============================================================
 
@@ -105,7 +105,9 @@ CREATE TABLE IF NOT EXISTS poster_projects (
 
     UNIQUE KEY uk_project_code (project_code),
     INDEX idx_status (status),
-    INDEX idx_created (created_at)
+    INDEX idx_created (created_at),
+    INDEX idx_festival (festival_code),
+    INDEX idx_brand (brand_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='海报项目';
 
 CREATE TABLE IF NOT EXISTS project_activities (
@@ -122,6 +124,7 @@ CREATE TABLE IF NOT EXISTS project_activities (
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_project (project_id),
+    INDEX idx_discount_type (discount_type_code),
     FOREIGN KEY (project_id) REFERENCES poster_projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目关联活动';
 
@@ -205,3 +208,38 @@ CREATE TABLE IF NOT EXISTS art_styles (
 
     UNIQUE KEY uk_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='艺术风格';
+
+-- ============================================================
+-- 系统配置
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS system_config (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    config_key  VARCHAR(100)  NOT NULL COMMENT '配置键',
+    config_value TEXT         DEFAULT NULL COMMENT '配置值',
+    label       VARCHAR(100)  DEFAULT NULL COMMENT '显示名称',
+    group_name  VARCHAR(50)   NOT NULL DEFAULT 'general' COMMENT '配置分组',
+    description VARCHAR(255)  DEFAULT NULL COMMENT '配置说明',
+    is_secret   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否密钥(前端脱敏显示)',
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置';
+
+-- ============================================================
+-- 系统日志（可选）
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    action      VARCHAR(50)     NOT NULL COMMENT '操作类型',
+    target_type VARCHAR(50)     NOT NULL COMMENT '操作对象',
+    target_id   BIGINT UNSIGNED DEFAULT NULL,
+    detail      JSON            DEFAULT NULL,
+    ip          VARCHAR(50)     DEFAULT NULL,
+    created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_action (action),
+    INDEX idx_target (target_type, target_id),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志';

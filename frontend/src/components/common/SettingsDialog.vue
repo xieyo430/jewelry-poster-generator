@@ -1,7 +1,11 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed, onBeforeUnmount } from 'vue'
 import api from '../../api'
 import { useToast } from '../../composables/useToast'
+import EdDialog from './EdDialog.vue'
+import EdButton from './EdButton.vue'
+import EdField from './EdField.vue'
+import EdIcon from './EdIcon.vue'
 
 const toast = useToast()
 const emit = defineEmits(['close'])
@@ -9,12 +13,13 @@ const emit = defineEmits(['close'])
 // ====== Tab ======
 const activeTab = ref('model')
 
-// ====== 模型设置（原有逻辑） ======
+// ====== 模型设置 ======
 const loading = ref(true)
 const saving = ref(false)
 const groups = ref({})
 const formData = ref({})
 const showPasswords = ref({})
+const clearPasswords = ref({})
 
 const uploadStats = ref({ count: 0, totalSize: '0 MB' })
 const cleanupDays = ref(7)
@@ -30,10 +35,8 @@ onMounted(async () => {
       groups.value = settingsRes.data.groups
       for (const fields of Object.values(settingsRes.data.groups)) {
         for (const field of fields) {
-          formData.value[field.key] = field.hasValue ? '' : ''
-          if (field.type === 'password' && field.hasValue) {
-            formData.value[field.key] = ''
-          }
+          formData.value[field.key] = ''
+          if (field.type === 'password') clearPasswords.value[field.key] = false
         }
       }
     }
@@ -47,33 +50,18 @@ onMounted(async () => {
   }
 })
 
-const handleCleanup = async () => {
-  const days = cleanupDays.value
-  const confirmMsg = days === 0
-    ? '确定要清理所有上传文件吗？'
-    : `确定要清理 ${days} 天前的上传文件吗？`
-  if (!confirm(confirmMsg)) return
-  cleaning.value = true
-  try {
-    const res = await api.cleanupUploads(days)
-    if (res.data.success) {
-      toast.success(res.data.message)
-      const statsRes = await api.getUploadStats()
-      if (statsRes.data.success) uploadStats.value = statsRes.data
-    }
-  } catch (e) {
-    toast.error('清理失败：' + e.message)
-  } finally {
-    cleaning.value = false
-  }
-}
-
 const handleSave = async () => {
   saving.value = true
   try {
     const updates = {}
     for (const [key, val] of Object.entries(formData.value)) {
-      if (val !== '') updates[key] = val
+      const field = Object.values(groups.value).flat().find(item => item.key === key)
+      if (field?.type === 'password') {
+        if (val !== '') updates[key] = val
+        else if (clearPasswords.value[key]) updates[key] = ''
+      } else if (val !== '') {
+        updates[key] = val
+      }
     }
     const res = await api.updateSettings(updates)
     if (res.data.success) {
@@ -89,6 +77,61 @@ const handleSave = async () => {
 
 const togglePassword = (key) => {
   showPasswords.value[key] = !showPasswords.value[key]
+}
+
+const updatePassword = (key, value) => {
+  formData.value[key] = value
+  if (value) clearPasswords.value[key] = false
+}
+
+// ====== 通用确认弹窗（替代原生 confirm） ======
+const confirmState = ref(null)
+function requestConfirm(msg, kind = 'danger') {
+  return new Promise((resolve) => { confirmState.value = { msg, kind, resolve } })
+}
+function answerConfirm(ok) {
+  confirmState.value?.resolve(ok)
+  confirmState.value = null
+}
+
+// ====== 自绘下拉 ======
+const openMenu = ref('')
+function onDocDown(e) {
+  if (!e.target.closest('[data-menu]')) openMenu.value = ''
+}
+onMounted(() => document.addEventListener('mousedown', onDocDown))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown))
+
+const cleanupOptions = [
+  { v: 0, l: '所有文件' },
+  { v: 1, l: '1天前' },
+  { v: 3, l: '3天前' },
+  { v: 7, l: '7天前' },
+  { v: 14, l: '14天前' },
+  { v: 30, l: '30天前' },
+]
+const cleanupLabel = computed(() => cleanupOptions.find(o => o.v === cleanupDays.value)?.l)
+const tableLabel = computed(() => tables.find(t => t.key === selectedTable.value)?.label)
+
+const handleCleanup = async () => {
+  const days = cleanupDays.value
+  const confirmMsg = days === 0
+    ? '确定要清理所有上传文件吗？'
+    : `确定要清理 ${days} 天前的上传文件吗？`
+  if (!await requestConfirm(confirmMsg, 'warning')) return
+  cleaning.value = true
+  try {
+    const res = await api.cleanupUploads(days)
+    if (res.data.success) {
+      toast.success(res.data.message)
+      const statsRes = await api.getUploadStats()
+      if (statsRes.data.success) uploadStats.value = statsRes.data
+    }
+  } catch (e) {
+    toast.error('清理失败：' + e.message)
+  } finally {
+    cleaning.value = false
+  }
 }
 
 // ====== 数据设置 ======
@@ -200,7 +243,7 @@ const saveEdit = async () => {
 }
 
 const deleteRow = async (row) => {
-  if (!confirm(`确定要删除"${row.name}"吗？`)) return
+  if (!await requestConfirm(`确定要删除"${row.name}"吗？`)) return
   try {
     const id = row.code || row.id
     switch (selectedTable.value) {
@@ -237,6 +280,8 @@ const cancelAdd = () => {
   addForm.value = {}
 }
 
+const normHex = (v) => (v && !v.startsWith('#') ? '#' + v : v)
+
 // 品牌LOGO上传
 const handleLogoUpload = async (e, code) => {
   const file = e.target.files?.[0]
@@ -252,7 +297,7 @@ const handleLogoUpload = async (e, code) => {
 }
 
 const handleLogoDelete = async (code) => {
-  if (!confirm('确定要删除该品牌LOGO吗？')) return
+  if (!await requestConfirm('确定要删除该品牌LOGO吗？')) return
   try {
     await api.deleteBrandLogo(code)
     toast.success('LOGO已删除')
@@ -297,736 +342,440 @@ const saveAdd = async () => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="settings-overlay" @click.self="emit('close')">
-      <div class="settings-dialog">
-        <!-- Header -->
-        <div class="settings-header">
-          <h2 class="settings-title">设置</h2>
-          <button class="settings-close" @click="emit('close')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
+  <EdDialog title="设置" :width="900" @close="emit('close')">
+    <nav class="tabline sd-tabs">
+      <button
+        type="button"
+        :class="['tabline__item', { 'is-active': activeTab === 'model' }]"
+        @click="activeTab = 'model'"
+      >模型配置</button>
+      <button
+        type="button"
+        :class="['tabline__item', { 'is-active': activeTab === 'data' }]"
+        @click="activeTab = 'data'"
+      >数据管理</button>
+    </nav>
 
-        <!-- Tabs -->
-        <div class="settings-tabs">
-          <button :class="['tab-btn', { active: activeTab === 'model' }]" @click="activeTab = 'model'">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-            模型设置
-          </button>
-          <button :class="['tab-btn', { active: activeTab === 'data' }]" @click="activeTab = 'data'">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            数据设置
-          </button>
-        </div>
+    <div class="sd-body">
+      <!-- ====== 模型配置 ====== -->
+      <template v-if="activeTab === 'model'">
+        <p v-if="loading" class="ed-meta sd-loading">加载中...</p>
 
-        <!-- Body -->
-        <div class="settings-body">
-
-          <!-- ====== 模型设置 Tab ====== -->
-          <template v-if="activeTab === 'model'">
-            <div v-if="loading" class="settings-loading">
-              <div class="md3-spinner"><span class="md3-spinner__circle"></span></div>
-              <span>加载中...</span>
+        <template v-else>
+          <section v-for="(fields, groupName) in groups" :key="groupName" class="sd-group">
+            <h4 class="sd-group__title ed-label">{{ groupName }}</h4>
+            <div v-for="field in fields" :key="field.key" class="sd-field">
+              <template v-if="field.type === 'password'">
+                <div class="pw-field">
+                  <EdField
+                    :model-value="formData[field.key]"
+                    :type="showPasswords[field.key] ? 'text' : 'password'"
+                    :label="field.label"
+                    :placeholder="field.hasValue ? '已设置，输入新 Key 可替换' : '未设置'"
+                    @update:model-value="updatePassword(field.key, $event)"
+                  />
+                  <button
+                    type="button"
+                    class="pw-field__eye"
+                    :title="showPasswords[field.key] ? '隐藏' : '显示'"
+                    @click="togglePassword(field.key)"
+                  >
+                    <EdIcon v-if="showPasswords[field.key]" name="eye-off" :size="16" />
+                    <EdIcon v-else name="eye" :size="16" />
+                  </button>
+                  <label v-if="field.hasValue" class="pw-field__clear">
+                    <input v-model="clearPasswords[field.key]" type="checkbox" />
+                    <span>清除已保存的 Key</span>
+                  </label>
+                </div>
+              </template>
+              <EdField
+                v-else
+                v-model="formData[field.key]"
+                :label="field.label"
+                :placeholder="field.hasValue ? field.value : '未设置'"
+              />
             </div>
+          </section>
 
-            <template v-else>
-              <div v-for="(fields, groupName) in groups" :key="groupName" class="settings-group">
-                <div class="settings-group-title">{{ groupName }}</div>
-                <div v-for="field in fields" :key="field.key" class="settings-field">
-                  <label class="settings-label">{{ field.label }}</label>
-                  <div class="settings-input-wrap">
-                    <input
-                      v-if="field.type === 'password'"
-                      :type="showPasswords[field.key] ? 'text' : 'password'"
-                      v-model="formData[field.key]"
-                      :placeholder="field.hasValue ? '已设置（留空保持不变）' : '未设置'"
-                      class="settings-input"
-                    />
-                    <input
-                      v-else
-                      type="text"
-                      v-model="formData[field.key]"
-                      :placeholder="field.hasValue ? field.value : '未设置'"
-                      class="settings-input"
-                    />
-                    <button
-                      v-if="field.type === 'password'"
-                      class="settings-eye"
-                      @click="togglePassword(field.key)"
-                      :title="showPasswords[field.key] ? '隐藏' : '显示'"
-                    >
-                      <svg v-if="showPasswords[field.key]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                    </button>
-                  </div>
-                  <span v-if="field.hasValue && field.type === 'password' && !formData[field.key]" class="settings-hint">
-                    当前: {{ field.value }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- 存储管理 -->
-              <div class="settings-group">
-                <div class="settings-group-title">存储管理</div>
-                <div class="cleanup-section">
-                  <div class="cleanup-info">
-                    <span class="cleanup-stats">
-                      上传文件：<strong>{{ uploadStats.count }}</strong> 个，
-                      占用 <strong>{{ uploadStats.totalSize }}</strong>
-                    </span>
-                    <span class="cleanup-note">新上传的图片已改为 Base64 存储，不再产生文件缓存</span>
-                  </div>
-                  <div class="cleanup-actions">
-                    <select v-model="cleanupDays" class="cleanup-select">
-                      <option :value="0">所有文件</option>
-                      <option :value="1">1天前</option>
-                      <option :value="3">3天前</option>
-                      <option :value="7">7天前</option>
-                      <option :value="14">14天前</option>
-                      <option :value="30">30天前</option>
-                    </select>
-                    <button
-                      class="md3-btn md3-btn--outlined md3-btn--danger"
-                      :disabled="cleaning || uploadStats.count === 0"
-                      @click="handleCleanup"
-                    >
-                      <span v-if="cleaning" class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
-                      <span v-else>清理文件</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </template>
-
-          <!-- ====== 数据设置 Tab ====== -->
-          <template v-if="activeTab === 'data'">
-            <!-- 表选择器 -->
-            <div class="data-toolbar">
-              <select v-model="selectedTable" class="data-select">
-                <option v-for="t in tables" :key="t.key" :value="t.key">{{ t.label }}</option>
-              </select>
-              <button class="md3-btn md3-btn--filled md3-btn--small" @click="startAdd">
-                + 新增
+          <section class="sd-group">
+            <h4 class="sd-group__title ed-label">存储管理</h4>
+            <p class="ed-meta sd-cleanup-stats">
+              上传文件：{{ uploadStats.count }} 个，占用 {{ uploadStats.totalSize }}
+            </p>
+            <p class="ed-meta sd-cleanup-note">新上传的图片已改为 Base64 存储，不再产生文件缓存</p>
+            <div class="sd-cleanup-row" data-menu>
+              <button type="button" class="menu-btn" @click="openMenu = openMenu === 'cleanup' ? '' : 'cleanup'">
+                <span>{{ cleanupLabel }}</span>
+                <EdIcon name="chevron-down" :size="14" :class="{ 'is-up': openMenu === 'cleanup' }" />
               </button>
-            </div>
-
-            <div v-if="dataLoading" class="settings-loading">
-              <div class="md3-spinner"><span class="md3-spinner__circle"></span></div>
-              <span>加载中...</span>
-            </div>
-
-            <div v-else class="data-table-wrap">
-              <!-- 新增行 -->
-              <div v-if="adding" class="data-edit-row">
-                <div class="data-edit-fields">
-                  <div v-for="f in currentTable.fields" :key="f.key" class="data-edit-field" v-show="f.key !== 'id'">
-                    <label class="data-field-label">{{ f.label }}<span v-if="f.key === 'code'" class="data-required">*</span></label>
-                    <div class="data-color-wrap" v-if="f.type === 'color'">
-                      <input type="color" v-model="addForm[f.key]" class="data-color-input" />
-                      <input type="text" v-model="addForm[f.key]" class="settings-input settings-input--small" />
-                    </div>
-                    <input v-else type="text" v-model="addForm[f.key]" class="settings-input settings-input--small" />
-                  </div>
-                </div>
-                <div class="data-edit-actions">
-                  <button class="md3-btn md3-btn--text md3-btn--small" @click="cancelAdd">取消</button>
-                  <button class="md3-btn md3-btn--filled md3-btn--small" @click="saveAdd">保存</button>
-                </div>
+              <div v-if="openMenu === 'cleanup'" class="menu-pop">
+                <button
+                  v-for="o in cleanupOptions"
+                  :key="o.v"
+                  type="button"
+                  :class="['menu-pop__item', { 'is-selected': o.v === cleanupDays }]"
+                  @click="cleanupDays = o.v; openMenu = ''"
+                >{{ o.l }}</button>
               </div>
-
-              <!-- 数据行 -->
-              <div v-for="row in tableData" :key="row.code || row.id" class="data-row">
-                <!-- 查看模式 -->
-                <div v-if="editingId !== (row.code || row.id)" class="data-row-view">
-                  <!-- 品牌LOGO列 -->
-                  <div v-if="selectedTable === 'brands'" class="data-logo-cell">
-                    <img
-                      :src="`/api/brands/${row.code}/logo`"
-                      class="data-logo-thumb"
-                      @error="$event.target.style.display='none'"
-                    />
-                    <label class="data-logo-upload" :title="row.hasLogo ? '更换LOGO' : '上传LOGO'">
-                      <input type="file" accept="image/*" @change="handleLogoUpload($event, row.code)" hidden />
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                    </label>
-                  </div>
-                  <div class="data-row-info">
-                    <span v-for="f in currentTable.fields" :key="f.key" class="data-cell">
-                      <span class="data-cell-label">{{ f.label }}:</span>
-                      <span v-if="f.type === 'color'" class="data-color-dot" :style="{ background: row[f.key] }"></span>
-                      <span>{{ row[f.key] ?? '-' }}</span>
-                    </span>
-                  </div>
-                  <div class="data-row-actions">
-                    <button class="data-action-btn" @click="startEdit(row)" title="编辑">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    </button>
-                    <button class="data-action-btn data-action-btn--danger" @click="deleteRow(row)" title="删除">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- 编辑模式 -->
-                <div v-else class="data-edit-row">
-                  <div class="data-edit-fields">
-                    <div v-for="f in currentTable.fields" :key="f.key" class="data-edit-field">
-                      <label class="data-field-label">{{ f.label }}</label>
-                      <div class="data-color-wrap" v-if="f.type === 'color'">
-                        <input type="color" v-model="editForm[f.key]" class="data-color-input" />
-                        <input type="text" v-model="editForm[f.key]" class="settings-input settings-input--small" :readonly="f.readonly" />
-                      </div>
-                      <input v-else type="text" v-model="editForm[f.key]" class="settings-input settings-input--small" :readonly="f.readonly" />
-                    </div>
-                  </div>
-                  <div class="data-edit-actions">
-                    <button class="md3-btn md3-btn--text md3-btn--small" @click="cancelEdit">取消</button>
-                    <button class="md3-btn md3-btn--filled md3-btn--small" @click="saveEdit">保存</button>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="!dataLoading && tableData.length === 0" class="data-empty">暂无数据</div>
+              <EdButton
+                variant="solid"
+                :loading="cleaning"
+                :disabled="uploadStats.count === 0"
+                @click="handleCleanup"
+              >清理文件</EdButton>
             </div>
-          </template>
-        </div>
+          </section>
+        </template>
+      </template>
 
-        <!-- Footer -->
-        <div class="settings-footer">
-          <button class="md3-btn md3-btn--text" @click="emit('close')">关闭</button>
-          <button v-if="activeTab === 'model'" class="md3-btn md3-btn--filled" :disabled="saving || loading" @click="handleSave">
-            <span v-if="saving" class="md3-spinner md3-spinner--small"><span class="md3-spinner__circle"></span></span>
-            <span v-else>保存</span>
+      <!-- ====== 数据管理 ====== -->
+      <template v-if="activeTab === 'data'">
+        <div class="sd-toolbar" data-menu>
+          <button type="button" class="menu-btn menu-btn--wide" @click="openMenu = openMenu === 'table' ? '' : 'table'">
+            <span>{{ tableLabel }}</span>
+            <EdIcon name="chevron-down" :size="14" :class="{ 'is-up': openMenu === 'table' }" />
           </button>
+          <div v-if="openMenu === 'table'" class="menu-pop">
+            <button
+              v-for="t in tables"
+              :key="t.key"
+              type="button"
+              :class="['menu-pop__item', { 'is-selected': t.key === selectedTable }]"
+              @click="selectedTable = t.key; openMenu = ''"
+            >{{ t.label }}</button>
+          </div>
+          <EdButton variant="outline" @click="startAdd">新增</EdButton>
         </div>
-      </div>
+
+        <p v-if="dataLoading" class="ed-meta sd-loading">加载中...</p>
+
+        <template v-else>
+          <!-- 新增 -->
+          <div v-if="adding" class="sd-edit">
+            <EdField
+              v-for="f in currentTable.fields.filter(f => f.key !== 'id' && !f.type)"
+              :key="f.key"
+              v-model="addForm[f.key]"
+              :label="f.label"
+              :placeholder="f.placeholder || ''"
+            />
+            <div v-for="f in currentTable.fields.filter(f => f.type === 'color')" :key="'c' + f.key" class="color-field">
+              <span class="color-field__box" :style="{ background: addForm[f.key] || 'transparent' }"></span>
+              <EdField
+                :model-value="addForm[f.key]"
+                @update:model-value="addForm[f.key] = normHex($event)"
+                :label="f.label"
+                placeholder="#RRGGBB"
+              />
+            </div>
+            <div class="sd-edit__actions">
+              <EdButton variant="text" @click="cancelAdd">取消</EdButton>
+              <EdButton variant="solid" @click="saveAdd">保存</EdButton>
+            </div>
+          </div>
+
+          <!-- 数据行 -->
+          <div v-for="row in tableData" :key="row.code || row.id" class="drow">
+            <!-- 查看 -->
+            <div v-if="editingId !== (row.code || row.id)" class="drow__view">
+              <div v-if="selectedTable === 'brands'" class="drow__logo">
+                <img
+                  :src="`/api/brands/${row.code}/logo`"
+                  class="drow__logo-img"
+                  @error="$event.target.style.display='none'"
+                >
+                <label class="drow__logo-up" :title="row.hasLogo ? '更换LOGO' : '上传LOGO'">
+                  <input type="file" accept="image/*" @change="handleLogoUpload($event, row.code)" hidden>
+                  <EdIcon name="upload" :size="12" />
+                </label>
+                <button
+                  v-if="row.hasLogo"
+                  type="button"
+                  class="drow__logo-del"
+                  title="删除LOGO"
+                  @click="handleLogoDelete(row.code)"
+                ><EdIcon name="close" :size="11" /></button>
+              </div>
+
+              <span class="drow__name">{{ row.name }}</span>
+              <span v-for="f in currentTable.fields.filter(f => f.key !== 'name')" :key="f.key" class="drow__cell ed-meta">
+                <span v-if="f.type === 'color'" class="color-dot" :style="{ background: row[f.key] }"></span>
+                <template v-else>{{ f.label }}：{{ row[f.key] ?? '—' }}</template>
+              </span>
+
+              <span class="drow__ops">
+                <button type="button" class="icon-btn" title="编辑" @click="startEdit(row)">
+                  <EdIcon name="edit" :size="14" />
+                </button>
+                <button type="button" class="icon-btn icon-btn--danger" title="删除" @click="deleteRow(row)">
+                  <EdIcon name="trash" :size="14" />
+                </button>
+              </span>
+            </div>
+
+            <!-- 编辑 -->
+            <div v-else class="sd-edit">
+              <template v-for="f in currentTable.fields" :key="f.key">
+                <div v-if="f.type === 'color'" class="color-field">
+                  <span class="color-field__box" :style="{ background: editForm[f.key] || 'transparent' }"></span>
+                  <EdField
+                    :model-value="editForm[f.key]"
+                    @update:model-value="editForm[f.key] = normHex($event)"
+                    :label="f.label"
+                    placeholder="#RRGGBB"
+                  />
+                </div>
+                <EdField
+                  v-else
+                  v-model="editForm[f.key]"
+                  :label="f.label"
+                  :disabled="f.readonly"
+                />
+              </template>
+              <div class="sd-edit__actions">
+                <EdButton variant="text" @click="cancelEdit">取消</EdButton>
+                <EdButton variant="solid" @click="saveEdit">保存</EdButton>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="!dataLoading && tableData.length === 0 && !adding" class="sd-empty">
+            <p class="sd-empty__line">暂无数据</p>
+            <hr class="ed-rule">
+          </div>
+        </template>
+      </template>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <EdButton variant="text" @click="emit('close')">关闭</EdButton>
+      <EdButton
+        v-if="activeTab === 'model'"
+        variant="solid"
+        :loading="saving"
+        :disabled="loading"
+        @click="handleSave"
+      >保存</EdButton>
+    </template>
+  </EdDialog>
+
+  <!-- 确认弹窗 -->
+  <EdDialog
+    v-if="confirmState"
+    :title="confirmState.kind === 'warning' ? '请确认操作' : '删除确认'"
+    :width="420"
+    @close="answerConfirm(false)"
+  >
+    <div :class="['note', { 'note--danger': confirmState.kind !== 'warning' }]">
+      <EdIcon
+        v-if="confirmState.kind === 'warning'"
+        name="warning"
+        :size="13"
+        class="sd-confirm-icon"
+      />
+      <EdIcon
+        v-else
+        name="trash"
+        :size="13"
+        class="sd-confirm-icon"
+      />
+      <span>{{ confirmState.msg }}</span>
+    </div>
+    <template #footer>
+      <EdButton variant="text" @click="answerConfirm(false)">取消</EdButton>
+      <EdButton variant="solid" @click="answerConfirm(true)">
+        {{ confirmState.kind === 'warning' ? '确定清理' : '删除' }}
+      </EdButton>
+    </template>
+  </EdDialog>
 </template>
 
 <style scoped>
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1100;
-  padding: 24px;
-}
+.sd-tabs { margin-bottom: var(--ed-space-5); }
 
-.settings-dialog {
-  background: var(--md-surface-container-low);
-  border-radius: var(--md-shape-extra-large);
-  width: 620px;
-  max-width: 100%;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--md-elevation-3);
-  animation: dialogIn 0.25s var(--md-easing-emphasized-decel);
-  overflow: hidden;
-}
+.sd-body { min-height: 200px; }
+.sd-loading { position: relative; display: flex; align-items: center; gap: 10px; text-transform: none; padding: var(--ed-space-6) 0; }
+.sd-loading::before { content: ''; width: 14px; height: 14px; flex: 0 0 14px; border: 1.5px solid var(--ed-accent); border-right-color: transparent; border-radius: 50%; animation: sd-loading-spin .85s linear infinite; }
+@keyframes sd-loading-spin { to { transform: rotate(360deg); } }
 
-@keyframes dialogIn {
-  from { opacity: 0; transform: scale(0.95) translateY(8px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+.sd-group { margin-bottom: var(--ed-space-6); }
+.sd-group__title {
+  padding-bottom: var(--ed-space-2);
+  border-bottom: 1px solid var(--ed-rule);
+  margin-bottom: var(--ed-space-4);
 }
+.sd-field { margin-bottom: var(--ed-space-2); }
 
-.settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 28px 0;
-}
-
-.settings-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--md-on-surface);
-  margin: 0;
-}
-
-.settings-close {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--md-duration-short4) var(--md-easing-standard);
-}
-.settings-close:hover {
-  background: var(--md-surface-container-highest);
-}
-
-/* Tabs */
-.settings-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 16px 28px 0;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border: none;
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  font-size: var(--md-label-large);
-  font-weight: 500;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-
-.tab-btn:hover {
-  color: var(--md-on-surface);
-  background: var(--md-surface-container);
-}
-
-.tab-btn.active {
-  color: var(--md-primary);
-  border-bottom-color: var(--md-primary);
-}
-
-.settings-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 28px;
-}
-
-.settings-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px 0;
-  color: var(--md-on-surface-variant);
-}
-
-.settings-group {
-  margin-bottom: 20px;
-}
-
-.settings-group-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--md-primary);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.settings-field {
-  margin-bottom: 14px;
-}
-
-.settings-label {
-  display: block;
-  font-size: var(--md-body-small);
-  font-weight: 500;
-  color: var(--md-on-surface);
-  margin-bottom: 6px;
-}
-
-.settings-input-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.settings-input {
-  width: 100%;
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-shape-small);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-  font-size: var(--md-body-medium);
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  transition: border-color var(--md-duration-short4) var(--md-easing-standard);
-  outline: none;
-}
-.settings-input:focus {
-  border-color: var(--md-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-primary) 20%, transparent);
-}
-.settings-input::placeholder {
-  color: var(--md-on-surface-variant);
-  opacity: 0.6;
-  font-family: inherit;
-}
-
-.settings-input--small {
-  height: 36px;
-  font-size: var(--md-body-small);
-}
-
-.settings-eye {
+.pw-field { position: relative; }
+.pw-field__eye {
   position: absolute;
-  right: 10px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: none;
+  right: 0;
+  bottom: var(--ed-space-2);
+  display: flex;
+  border: 0;
   background: transparent;
-  color: var(--md-on-surface-variant);
+  color: var(--ed-ink-faint);
   cursor: pointer;
+}
+.pw-field__eye:hover { color: var(--ed-ink); }
+.pw-field__clear {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: background var(--md-duration-short4) var(--md-easing-standard);
-}
-.settings-eye:hover {
-  background: var(--md-surface-container-highest);
-}
-
-.settings-hint {
-  display: block;
+  gap: var(--ed-space-2);
+  margin-top: var(--ed-space-2);
+  color: var(--ed-ink-faint);
   font-size: 12px;
-  color: var(--md-on-surface-variant);
-  margin-top: 4px;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  opacity: 0.7;
+  cursor: pointer;
+}
+.pw-field__clear input { accent-color: var(--ed-accent); }
+
+.sd-cleanup-stats { text-transform: none; margin-bottom: var(--ed-space-1); }
+.sd-cleanup-note { text-transform: none; margin-bottom: var(--ed-space-4); }
+.sd-cleanup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ed-space-4);
+  position: relative;
 }
 
-.settings-footer {
+.sd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ed-space-4);
+  margin-bottom: var(--ed-space-5);
+  position: relative;
+}
+
+.menu-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--ed-space-2);
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--ed-rule);
+  background: transparent;
+  color: var(--ed-ink);
+  font-size: 14px;
+  cursor: pointer;
+}
+.menu-btn--wide { min-width: 140px; justify-content: space-between; }
+.menu-btn svg { color: var(--ed-ink-faint); transition: transform var(--ed-fast) var(--ed-ease); }
+.menu-btn svg.is-up { transform: rotate(180deg); }
+
+.menu-pop {
+  position: absolute;
+  top: calc(100% + var(--ed-space-2));
+  left: 0;
+  z-index: 100;
+  min-width: 150px;
+  background: var(--ed-paper);
+  border: 1px solid var(--ed-ink);
+}
+.menu-pop__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--ed-space-2) var(--ed-space-4);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--ed-ink);
+  font-size: 14px;
+  cursor: pointer;
+}
+.menu-pop__item:hover { background: var(--ed-paper-deep); }
+.menu-pop__item.is-selected { border-left-color: var(--ed-accent); font-weight: 600; }
+
+.sd-edit {
+  padding: var(--ed-space-4) 0;
+  border-bottom: 1px solid var(--ed-rule-strong);
+}
+.sd-edit__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 28px 20px;
-  border-top: 1px solid var(--md-outline-variant);
+  gap: var(--ed-space-2);
+  margin-top: var(--ed-space-3);
 }
 
-/* MD3 buttons */
-.md3-btn {
-  height: 40px;
-  padding: 0 24px;
-  border-radius: 20px;
-  border: none;
-  font-size: var(--md-label-large);
-  font-weight: 500;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-.md3-btn--filled {
-  background: var(--md-primary);
-  color: var(--md-on-primary);
-}
-.md3-btn--filled:hover { box-shadow: var(--md-elevation-1); }
-.md3-btn--filled:disabled { opacity: 0.38; cursor: not-allowed; }
-.md3-btn--text {
-  background: transparent;
-  color: var(--md-primary);
-}
-.md3-btn--text:hover {
-  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
-}
-.md3-btn--outlined {
-  background: transparent;
-  color: var(--md-primary);
-  border: 1px solid var(--md-outline);
-}
-.md3-btn--outlined:hover {
-  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
-}
-.md3-btn--small {
-  height: 32px;
-  padding: 0 16px;
-  font-size: var(--md-body-small);
-  border-radius: 16px;
-}
-.md3-btn--danger {
-  color: var(--md-error);
-  border-color: var(--md-error);
-}
-.md3-btn--danger:hover {
-  background: color-mix(in srgb, var(--md-error) 8%, transparent);
-}
-.md3-btn--danger:disabled { opacity: 0.38; cursor: not-allowed; }
-
-.md3-spinner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.md3-spinner__circle {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--md-outline);
-  border-top-color: var(--md-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-.md3-spinner--small .md3-spinner__circle {
-  width: 16px;
-  height: 16px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Cleanup */
-.cleanup-section {
-  background: var(--md-surface-container);
-  border-radius: var(--md-shape-small);
-  padding: 16px;
-}
-.cleanup-info { margin-bottom: 12px; }
-.cleanup-stats {
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface);
-}
-.cleanup-stats strong { color: var(--md-primary); font-weight: 600; }
-.cleanup-note {
-  display: block;
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-  margin-top: 4px;
-  font-style: italic;
-}
-.cleanup-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.cleanup-select {
-  height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-shape-small);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-  font-size: var(--md-body-medium);
-  cursor: pointer;
-  outline: none;
-}
-.cleanup-select:focus { border-color: var(--md-primary); }
-
-/* ====== 数据设置 ====== */
-.data-toolbar {
+.drow { border-bottom: 1px solid var(--ed-rule); }
+.drow__view {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.data-select {
-  height: 40px;
-  padding: 0 14px;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-shape-small);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-  font-size: var(--md-body-medium);
-  cursor: pointer;
-  outline: none;
-  min-width: 160px;
-}
-.data-select:focus { border-color: var(--md-primary); }
-
-.data-table-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.data-row {
-  background: var(--md-surface);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-small);
-  overflow: hidden;
-}
-
-.data-row-view {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  gap: 12px;
-}
-
-.data-row-info {
-  flex: 1;
-  display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
-  min-width: 0;
+  gap: var(--ed-space-4);
+  padding: var(--ed-space-3) 0;
 }
+.drow__name {
+  font-family: var(--ed-serif);
+  font-size: 15px;
+  color: var(--ed-ink);
+}
+.drow__cell { text-transform: none; }
+.drow__ops { display: flex; gap: var(--ed-space-1); margin-left: auto; }
 
-.data-cell {
+.icon-btn {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface);
+  border: 0;
+  background: transparent;
+  color: var(--ed-ink-faint);
+  cursor: pointer;
+  padding: var(--ed-space-1);
 }
+.icon-btn:hover { color: var(--ed-ink); }
+.icon-btn--danger:hover { color: var(--ed-danger); }
 
-.data-cell-label {
-  color: var(--md-on-surface-variant);
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-/* 品牌LOGO */
-.data-logo-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.data-logo-thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--md-shape-small);
+.drow__logo { display: flex; align-items: center; gap: var(--ed-space-2); }
+.drow__logo-img {
+  width: 28px;
+  height: 28px;
   object-fit: contain;
-  border: 1px solid var(--md-outline-variant);
-  background: var(--md-surface-container);
+  border: 1px solid var(--ed-rule);
 }
-
-.data-logo-upload {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px dashed var(--md-outline);
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  cursor: pointer;
+.drow__logo-up {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
+  color: var(--ed-ink-faint);
+  cursor: pointer;
 }
-
-.data-logo-upload:hover {
-  border-color: var(--md-primary);
-  color: var(--md-primary);
-  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+.drow__logo-up:hover { color: var(--ed-ink); }
+.drow__logo-del {
+  display: flex;
+  border: 0;
+  background: transparent;
+  color: var(--ed-ink-faint);
+  cursor: pointer;
+  padding: 0;
 }
+.drow__logo-del:hover { color: var(--ed-danger); }
 
-.data-color-dot {
+.color-dot {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid var(--md-outline-variant);
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--ed-rule-strong);
+  margin-right: var(--ed-space-1);
+  vertical-align: -1px;
+}
+
+.color-field {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--ed-space-3);
+}
+.color-field__box {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--ed-ink);
   flex-shrink: 0;
 }
 
-.data-row-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.data-action-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--md-duration-short4) var(--md-easing-standard);
-}
-.data-action-btn:hover {
-  background: var(--md-surface-container-highest);
-}
-.data-action-btn--danger:hover {
-  background: color-mix(in srgb, var(--md-error) 12%, transparent);
-  color: var(--md-error);
-}
-
-/* 编辑行 */
-.data-edit-row {
-  padding: 14px;
-  background: var(--md-surface);
-  border: 1px solid var(--md-primary);
-  border-radius: var(--md-shape-small);
-}
-
-.data-edit-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.data-edit-field {
-  flex: 1;
-  min-width: 120px;
-}
-
-.data-field-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--md-on-surface-variant);
-  margin-bottom: 4px;
-}
-
-.data-required {
-  color: var(--md-error);
-  margin-left: 2px;
-}
-
-.data-color-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.data-color-input {
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-small);
-  cursor: pointer;
-  padding: 2px;
-  background: var(--md-surface);
-}
-
-.data-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.data-empty {
+.sd-empty { padding: var(--ed-space-6) 0; }
+.sd-empty__line {
+  font-family: var(--ed-serif);
   text-align: center;
-  padding: 32px;
-  color: var(--md-on-surface-variant);
-  font-size: var(--md-body-medium);
+  margin-bottom: var(--ed-space-3);
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-  .settings-dialog { width: 100%; max-height: 95vh; }
-  .data-row-info { flex-direction: column; gap: 4px; }
-  .data-edit-fields { flex-direction: column; }
-}
+.sd-confirm-icon { flex-shrink: 0; margin-top: 2px; }
 </style>

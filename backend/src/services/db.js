@@ -26,6 +26,18 @@ async function testConnection() {
   }
 }
 
+async function getConnection() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await pool.getConnection();
+    } catch (err) {
+      if (attempt === 1) throw err;
+      console.warn('[db] 获取连接失败，重试一次:', err.message);
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }
+}
+
 async function query(sql, params) {
   try {
     const [rows] = await pool.query(sql, params || []);
@@ -51,4 +63,4 @@ async function queryOne(sql, params) {
   return rows && rows.length > 0 ? rows[0] : null;
 }
 
-module.exports = { pool, query, queryOne, testConnection };
+module.exports = { pool, query, queryOne, testConnection, getConnection };

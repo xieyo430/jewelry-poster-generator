@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import EdField from './EdField.vue'
+import EdIcon from './EdIcon.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -52,37 +54,37 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
 </script>
 
 <template>
-  <div ref="dropdownRef" class="dts-wrapper">
-    <button :class="['md3-field md3-field--outlined', { 'dts-open': open }]" @click="toggleOpen">
-      <span :class="['dts-display', { 'dts-placeholder': !selectedName }]">
+  <div ref="dropdownRef" class="dts">
+    <button type="button" :class="['dts__trigger', { 'is-open': open }]" @click="toggleOpen">
+      <span :class="['dts__value', { 'is-placeholder': !selectedName }]">
         {{ selectedName || placeholder }}
       </span>
-      <svg class="dts-arrow" :class="{ 'dts-arrow--up': open }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      <EdIcon name="chevron-down" :size="15" class="dts__arrow" :class="{ 'is-up': open }" />
     </button>
 
     <Transition name="dts-drop">
-      <div v-if="open" class="dts-dropdown">
-        <div class="dts-search">
-          <input
-            v-model="search"
-            class="dts-search-input"
-            placeholder="搜索优惠类型..."
-            @click.stop
-          />
+      <div v-if="open" class="dts__panel">
+        <div class="dts__search">
+          <EdIcon name="search" :size="14" class="dts__search-icon" />
+          <EdField v-model="search" placeholder="搜索优惠类型..." />
         </div>
-        <div class="dts-list">
+        <div class="dts__list">
           <template v-for="cat in categories" :key="cat">
-            <div v-if="getTypes(cat).length" class="dts-category">{{ cat }}</div>
+            <div v-if="getTypes(cat).length" class="dts__cat ed-label">{{ cat }}</div>
             <button
               v-for="dt in getTypes(cat)"
               :key="dt.id"
-              :class="['dts-item', { 'dts-item--selected': dt.id === modelValue }]"
+              type="button"
+              :class="['dts__item', { 'is-selected': dt.id === modelValue }]"
               @click="selectItem(dt.id)"
             >
               {{ dt.name }}
             </button>
           </template>
-          <div v-if="!hasResults" class="dts-empty">未找到匹配项</div>
+          <div v-if="!hasResults" class="dts__empty">
+            <hr class="ed-rule" />
+            <p class="ed-meta">未找到匹配项</p>
+          </div>
         </div>
       </div>
     </Transition>
@@ -90,130 +92,65 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
 </template>
 
 <style scoped>
-.dts-wrapper {
-  position: relative;
+.dts__trigger {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--ed-space-2);
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--ed-rule);
+  background: transparent;
+  cursor: pointer;
 }
+.dts__trigger:hover,
+.dts__trigger.is-open { border-bottom-color: var(--ed-ink); }
+.dts__value { flex: 1; text-align: left; font-size: 14px; color: var(--ed-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dts__value.is-placeholder { color: var(--ed-ink-faint); }
+.dts__arrow { color: var(--ed-ink-faint); transition: transform var(--ed-fast) var(--ed-ease); }
+.dts__arrow.is-up { transform: rotate(180deg); }
 
-.dts-open {
-  border-color: var(--md-primary) !important;
-}
-
-.dts-display {
-  flex: 1;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--md-body-medium);
-  color: var(--md-on-surface);
-}
-
-.dts-placeholder {
-  color: var(--md-on-surface-variant);
-}
-
-.dts-arrow {
-  color: var(--md-on-surface-variant);
-  transition: transform var(--md-duration-short4) var(--md-easing-standard);
-  flex-shrink: 0;
-  margin-left: 8px;
-}
-
-.dts-arrow--up {
-  transform: rotate(180deg);
-}
-
-.dts-dropdown {
+.dts__panel {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--ed-space-2));
   left: 0;
   right: 0;
-  background: var(--md-surface-container);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-medium);
-  box-shadow: var(--md-elevation-2);
   z-index: 100;
-  overflow: hidden;
+  background: var(--ed-paper);
+  border: 1px solid var(--ed-ink);
 }
 
-.dts-search {
-  padding: 8px;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
+.dts-drop-enter-active { transition: opacity var(--ed-fast) var(--ed-ease); }
+.dts-drop-leave-active { transition: opacity var(--ed-fast) var(--ed-ease); }
+.dts-drop-enter-from,
+.dts-drop-leave-to { opacity: 0; }
 
-.dts-search-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-small);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-  font-size: var(--md-body-small);
-  font-family: var(--md-font-family);
-  outline: none;
-  box-sizing: border-box;
+.dts__search {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--ed-space-2);
+  padding: var(--ed-space-3) var(--ed-space-4) 0;
 }
+.dts__search-icon { color: var(--ed-ink-faint); margin-bottom: var(--ed-space-2); }
 
-.dts-search-input:focus {
-  border-color: var(--md-primary);
-}
-
-.dts-list {
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.dts-category {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--md-on-surface-variant);
-  padding: 10px 16px 4px;
-}
-
-.dts-item {
+.dts__list { max-height: 260px; overflow-y: auto; padding: var(--ed-space-2) 0 var(--ed-space-3); }
+.dts__cat { padding: var(--ed-space-3) var(--ed-space-4) var(--ed-space-1); color: var(--ed-ink-faint); }
+.dts__item {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 16px;
-  border: none;
+  padding: var(--ed-space-2) var(--ed-space-4);
+  border: 0;
+  border-left: 2px solid transparent;
   background: transparent;
-  color: var(--md-on-surface);
-  font-size: var(--md-body-small);
-  font-family: var(--md-font-family);
+  color: var(--ed-ink);
+  font-size: 14px;
   cursor: pointer;
-  transition: background var(--md-duration-short4) var(--md-easing-standard);
 }
+.dts__item:hover { background: var(--ed-paper-deep); }
+.dts__item.is-selected { border-left-color: var(--ed-accent); font-weight: 600; }
 
-.dts-item:hover {
-  background: var(--md-surface-container-high);
-}
-
-.dts-item--selected {
-  background: var(--md-primary-container);
-  color: var(--md-on-primary-container);
-  font-weight: 500;
-}
-
-.dts-empty {
-  padding: 16px;
-  text-align: center;
-  font-size: var(--md-body-small);
-  color: var(--md-on-surface-variant);
-}
-
-.dts-drop-enter-active {
-  transition: all var(--md-duration-short4) var(--md-easing-standard);
-}
-.dts-drop-leave-active {
-  transition: all var(--md-duration-short3) var(--md-easing-standard);
-}
-.dts-drop-enter-from,
-.dts-drop-leave-to {
-  opacity: 0;
-  transform: translateY(-8px) scaleY(0.95);
-}
+.dts__empty { padding: var(--ed-space-4); text-align: center; }
+.dts__empty .ed-meta { display: block; margin-top: var(--ed-space-3); text-transform: none; }
 </style>
