@@ -252,17 +252,19 @@ h1 .l2{letter-spacing:-.022em}
   <!-- hand-drawn notes -->
   <div class="annot">
     <svg viewBox="0 0 1440 1080" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <marker id="landing-arrowhead" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M1 1 L10 6 L1 11" fill="none" stroke="var(--forest)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+        </marker>
+      </defs>
       <!-- "//" doodle -->
       <path class="draw" data-draw stroke-width="7" d="M250 366 L273 397"/>
       <path class="draw" data-draw stroke-width="7" d="M267 360 L288 393"/>
       <!-- long curling arrow under the right note -->
-      <path class="draw" data-draw stroke-width="2.6"
+      <path class="draw" data-draw stroke-width="2.6" marker-end="url(#landing-arrowhead)"
         d="M1196 352 C1322 378, 1334 470, 1212 522 C1152 547, 1114 558, 1098 574"/>
-      <path class="draw" data-draw stroke-width="2.6"
-        d="M1088 563 L1098 574 L1110 563"/>
       <!-- 无需设计师 arrow -->
-      <path class="draw" data-draw stroke-width="2.4" d="M582 930 Q606 918 623 913"/>
-      <path class="draw" data-draw stroke-width="2.4" d="M614 906 L624 912 L614 920"/>
+      <path class="draw" data-draw stroke-width="2.4" marker-end="url(#landing-arrowhead)" d="M582 930 Q606 918 623 913"/>
     </svg>
     <div class="hand fade" style="left:calc(1212px*var(--sx));top:calc(320px*var(--sy));transform:translate(-50%,-50%) rotate(16deg)">一键出图<br>今天就用上</div>
     <div class="hand fade" style="left:calc(521px*var(--sx));top:calc(940px*var(--sy));transform:translate(-50%,-50%) rotate(24deg)">无需设计师</div>
